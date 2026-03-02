@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <a class="btn btn-success" href="{{ url_for('clients.new_client') }}">
+      + Новый клиент
+    </a>
+
+    {% if is_admin %}
+      <button class="btn btn-outline-danger ms-2" data-bs-toggle="modal" data-bs-target="#deleteClientModal">
+        Удалить клиента
+      </button>
+    {% endif %}
+  </div>
+
+  <div class="d-flex flex-column align-items-end small">
+    <a class="text-decoration-none" href="/reports/all?preset=jan">По всем клиентам за Январь</a>
+    <a class="text-decoration-none" href="/reports/all?preset=feb">По всем клиентам за Февраль</a>
+  </div>
+</div>
+
+{% if is_admin %}
+<!-- Modal: delete client -->
+<div class="modal fade" id="deleteClientModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Удалить клиента</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <form method="post" action="{{ url_for('clients.delete_client') }}">
+        <div class="modal-body">
+          <div class="alert alert-warning mb-3">
+            Удаление необратимо: будут удалены договоры, остатки и талоны выбранного клиента.
+          </div>
+
+          <label class="form-label">Выбери клиента *</label>
+          <select class="form-select" name="client_id" required>
+            <option value="" selected disabled>— Выбери —</option>
+            {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }} (ID: {{ c.id }})</option>
+            {% endfor %}
+          </select>
+
+          {% if clients|length == 0 %}
+            <div class="text-muted small mt-2">Клиентов нет — удалять нечего.</div>
+          {% endif %}
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-danger" {% if clients|length == 0 %}disabled{% endif %}>Удалить</button>
+          <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card card-soft">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th style="width: 45%;">Клиент</th>
+            <th style="width: 20%;">Талоны</th>
+            <th style="width: 35%;">Быстрые ссылки</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in clients %}
+          <tr>
+            <td>
+              <div class="fw-semibold">{{ c.name }}</div>
+              <div class="text-muted small">ID: {{ c.id }}</div>
+            </td>
+            <td>
+              <a class="text-decoration-none" href="{{ url_for('clients.client_talons', client_id=c.id) }}">
+                {{ c.talons|length }}
+              </a>
+            </td>
+            <td class="small">
+              <a class="text-decoration-none me-3" href="{{ url_for('clients.client_talons', client_id=c.id) }}">Талоны</a>
+              <a class="text-decoration-none me-3" href="{{ url_for('clients.client_profile', client_id=c.id) }}">Профиль</a>
+              <a class="text-decoration-none me-3" href="{{ url_for('clients.client_contracts', client_id=c.id) }}">Договор</a>
+              <a class="text-decoration-none" href="{{ url_for('clients.client_reports', client_id=c.id) }}">Отчёты</a>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if clients|length == 0 %}
+          <tr>
+            <td colspan="3" class="text-muted p-4">Пока нет клиентов.</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

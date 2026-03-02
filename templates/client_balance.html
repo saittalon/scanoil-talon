@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_client_header.html" %}
+<div class="card card-soft">
+  <div class="card-body">
+    <h5 class="mb-3">Баланс</h5>
+    {% if not balances %}
+      <div class="text-muted">Пока нет записей баланса.</div>
+    {% else %}
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>Товар</th><th>Литры</th><th>Контроль</th><th>Договор</th><th>Обновлено</th></tr></thead>
+          <tbody>
+          {% for b in balances %}
+            <tr>
+              <td>{{ b.product_name }}</td>
+              <td><b>{{ b.liters_left }}</b></td>
+              <td>{{ "Да" if b.balance_control else "Нет" }}</td>
+              <td>{{ b.contract.number if b.contract else "—" }}</td>
+              <td>{{ b.updated_at }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

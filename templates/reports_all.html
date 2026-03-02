@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card card-soft">
+  <div class="card-body">
+    <h5 class="mb-3">Отчёт по всем клиентам</h5>
+    <form class="row g-3" method="get" action="/reports/all">
+      <input type="hidden" name="preset" value="">
+      <div class="col-md-3">
+        <label class="form-label">Период (от)</label>
+        <input class="form-control" type="date" name="date_from" value="{{ date_from or '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Период (до)</label>
+        <input class="form-control" type="date" name="date_to" value="{{ date_to or '' }}">
+      </div>
+      <div class="col-md-6 d-flex align-items-end gap-2">
+        <button class="btn btn-outline-dark" type="submit">Показать</button>
+        <a class="btn btn-success" href="/reports/all.xlsx?date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">Скачать Excel</a>
+      </div>
+      <div class="col-12 text-muted small">
+        Отчёт формируется по <b>использованным</b> талонам (как операции).
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card card-soft mt-3">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th>Дата</th><th>Время</th><th>Владелец</th><th>Клиент</th><th>Операция</th>
+            <th>Услуга</th><th>Количество</th><th>Цена</th><th>Стоимость</th><th>АЗС</th><th>Адрес</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r["Дата"] }}</td>
+            <td>{{ r["Время"] }}</td>
+            <td>{{ r["Владелец"] }}</td>
+            <td>{{ r["Клиент"] }}</td>
+            <td>{{ r["Операция"] }}</td>
+            <td>{{ r["Услуга"] }}</td>
+            <td>{{ r["Количество"] }}</td>
+            <td>{{ r["Цена"] }}</td>
+            <td><b>{{ r["Стоимость"] }}</b></td>
+            <td>{{ r["АЗС"] }}</td>
+            <td>{{ r["Адрес"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

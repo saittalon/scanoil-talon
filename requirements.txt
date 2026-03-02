@@ -1,0 +1,10 @@
+Flask
+Flask-SQLAlchemy
+Flask-Login
+gunicorn
+pandas
+openpyxl
+qrcode[pil]
+python-telegram-bot==21.6
+Pillow
+reportlab

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <h4 class="mb-0">Отчёты</h4>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card card-soft">
+      <div class="card-body">
+        <h5 class="mb-2">По всем клиентам</h5>
+        <div class="text-muted small mb-3">Отчёт операций (использованные талоны) за выбранный период.</div>
+        <a class="btn btn-success" href="/reports/all">Открыть</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card card-soft">
+      <div class="card-body">
+        <h5 class="mb-2">По клиенту</h5>
+        <div class="text-muted small mb-3">Выбери клиента и получи список талонов + выгрузку Excel.</div>
+        <div class="d-flex gap-2">
+          <select class="form-select" id="clientSelect">
+            {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-outline-dark" onclick="goClientReport()">Открыть</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function goClientReport(){
+  const id = document.getElementById('clientSelect').value;
+  if(!id) return;
+  window.location.href = `/clients/${id}/reports`;
+}
+</script>
+{% endblock %}

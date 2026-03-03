@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 {% include "_client_header.html" %}
+
 <div class="card card-soft">
   <div class="card-body">
     <h5 class="mb-3">Новый договор</h5>
 
-    <form method="post" enctype="multipart/form-data"
+    <form method="post"
+          enctype="multipart/form-data"
           action="{{ url_for('clients.contract_new_post', client_id=client.id) }}">
-
       <div class="row g-3">
-
         <div class="col-md-6">
           <label class="form-label">Договор *</label>
           <input class="form-control" name="number" required>
@@ -43,6 +43,12 @@
         </div>
 
         <div class="col-md-6">
+          <label class="form-label">PDF договора (не обязательно)</label>
+          <input class="form-control" type="file" name="contract_pdf" accept="application/pdf">
+          <div class="form-text">Только PDF</div>
+        </div>
+
+        <div class="col-md-6">
           <label class="form-label">Группы АЗС</label>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="allow_all_stations" id="allowAll" checked>
@@ -55,25 +61,10 @@
           <input class="form-control" name="forbidden_groups">
         </div>
 
-        <!-- 🔥 Загрузка PDF -->
-        <div class="col-md-6">
-          <label class="form-label">PDF договора</label>
-          <input class="form-control" type="file" name="contract_pdf" accept="application/pdf">
-        </div>
-
-        <div class="col-md-6">
-          <label class="form-label">PDF доп. соглашения</label>
-          <input class="form-control" type="file" name="addendum_pdf" accept="application/pdf">
-        </div>
-
         <div class="col-12 d-flex gap-2">
           <button class="btn btn-success px-4">Сохранить</button>
-          <a class="btn btn-link"
-             href="{{ url_for('clients.client_contracts', client_id=client.id) }}">
-             Отменить
-          </a>
+          <a class="btn btn-link" href="{{ url_for('clients.client_contracts', client_id=client.id) }}">Отменить</a>
         </div>
-
       </div>
     </form>
   </div>

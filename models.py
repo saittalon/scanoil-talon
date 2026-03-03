@@ -47,11 +47,33 @@ class Contract(db.Model):
     date_to = db.Column(db.Date, nullable=True)
 
     tariff_name = db.Column(db.String(200), nullable=True)
-    price_per_liter = db.Column(db.Float, nullable=True)  # тг/л
+    price_per_liter = db.Column(db.Float, nullable=True)
     online = db.Column(db.Boolean, default=False)
 
     allow_all_stations = db.Column(db.Boolean, default=True)
     forbidden_groups = db.Column(db.String(500), nullable=True)
+
+    # ✅ PDF самого договора
+    contract_pdf_path = db.Column(db.String(500), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+class ContractAddendum(db.Model):
+    __tablename__ = "contract_addendum"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    contract_id = db.Column(db.Integer, db.ForeignKey("contract.id"), nullable=False)
+    contract = db.relationship("Contract", backref=db.backref("addendums", lazy=True, order_by="ContractAddendum.id.desc()"))
+
+    number = db.Column(db.String(120), nullable=False)  # "Доп.соглашение №1"
+    date_from = db.Column(db.Date, nullable=False)
+    date_to = db.Column(db.Date, nullable=True)
+
+    liters_total = db.Column(db.Float, default=0.0)     # сколько литров выделили по допнику
+    comment = db.Column(db.String(500), nullable=True)
+
+    pdf_path = db.Column(db.String(500), nullable=True) # сюда позже запишем путь/URL на PDF
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

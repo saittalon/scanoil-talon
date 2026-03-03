@@ -8,3 +8,4 @@ qrcode[pil]
 python-telegram-bot==21.6
 Pillow
 reportlab
+psycopg2-binary

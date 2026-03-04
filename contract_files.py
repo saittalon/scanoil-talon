@@ -15,7 +15,7 @@ import os
 from supabase import create_client
 
 def sb():
-    url = "https://amfzsjanjzqgfyeqxth.supabase.co"  # <-- временно
+    url = "https://amfzsjnanjzgqfyeqxth.supabase.co"  # <-- временно
     key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
 
     print("SUPABASE_URL =", url)

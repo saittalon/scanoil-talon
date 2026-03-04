@@ -12,8 +12,12 @@ contract_files_bp = Blueprint("contract_files", __name__)
 
 
 def sb():
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    url = (os.getenv("SUPABASE_URL") or "").strip()
+    key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+
+    print("SUPABASE_URL=", repr(url))
+    print("SUPABASE_KEY_SET=", bool(key), "len=", len(key))
+
     return create_client(url, key)
 
 

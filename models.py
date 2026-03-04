@@ -42,6 +42,8 @@ class Client(db.Model):
 
 class Contract(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+
+    # Важно: у тебя таблица Client по умолчанию будет "client"
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     client = db.relationship("Client", backref=db.backref("contracts", lazy=True))
 
@@ -61,25 +63,32 @@ class Contract(db.Model):
 
 class ContractFile(db.Model):
     """
-    Единая таблица файлов договора:
-    - kind='contract'  -> основной PDF договора
-    - kind='addendum'  -> доп соглашение (PDF)
-    - kind='attachment'-> любой другой файл (PDF)
+    Таблица файлов договора (как "папка" в 1С):
+    - kind='contract'   -> основной договор (обычно 1 PDF)
+    - kind='addendum'   -> доп. соглашения (PDF, много)
+    - kind='attachment' -> прочие вложения (если нужно)
     """
     __tablename__ = "contract_files"
 
-    id = db.Column(db.BigInteger, primary_key=True)
-    contract_id = db.Column(db.BigInteger, db.ForeignKey("contract.id"), nullable=False)
-    contract = db.relationship("Contract", backref=db.backref("files", lazy=True, order_by="ContractFile.id.desc()"))
+    id = db.Column(db.Integer, primary_key=True)
 
-    kind = db.Column(db.String(50), nullable=False, default="attachment")
+    contract_id = db.Column(db.Integer, db.ForeignKey("contract.id"), nullable=False, index=True)
+    contract = db.relationship(
+        "Contract",
+        backref=db.backref("files", lazy=True, order_by="ContractFile.id.desc()")
+    )
+
+    kind = db.Column(db.String(50), nullable=False, default="attachment")  # contract / addendum / attachment
     title = db.Column(db.String(300), nullable=True)
 
+    # куда сохранил на сервере, например: uploads/contracts/12/xxxx.pdf
     storage_path = db.Column(db.String(500), nullable=False)
+
+    # оригинальное имя файла из загрузки
     original_name = db.Column(db.String(500), nullable=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class Balance(db.Model):
@@ -141,7 +150,7 @@ class AGZS(db.Model):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password: str) -> bool:
-        return check_password_hash(self.password_hash, password)
+        return check_password_hash(password, self.password_hash)
 
 
 class WebAppToken(db.Model):

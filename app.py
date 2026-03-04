@@ -3,7 +3,6 @@ from datetime import datetime
 
 from flask import Flask, redirect, url_for, request, jsonify, render_template
 from flask_login import LoginManager
-from sqlalchemy import text
 
 from config import Config
 from models import (
@@ -15,6 +14,9 @@ from models import (
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
+
+# ✅ ВАЖНО: подключаем файлы договоров (PDF)
+from contract_files import contract_files_bp
 
 
 def create_app():
@@ -31,9 +33,13 @@ def create_app():
     def load_user(user_id):
         return User.query.get(int(user_id))
 
+    # ✅ Регистрируем блюпринты
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
     app.register_blueprint(reports_bp)
+
+    # ✅ Файлы договоров (PDF)
+    app.register_blueprint(contract_files_bp)
 
     @app.get("/")
     def home():
@@ -112,25 +118,23 @@ def create_app():
     # ---------------- DB init (SAFE) ----------------
     def init_db(seed: bool = False):
         """
-        SAFE MODE (default): only creates missing tables, DOES NOT insert data.
-        SEED MODE: inserts initial admin/agzs/client/etc. Run ONLY when INIT_DB=1.
+        SAFE MODE (default): only creates tables, DOES NOT insert test data.
+        SEED MODE: inserts initial data (admin/agzs/etc). Run ONLY when INIT_DB=1.
         """
-        from datetime import date, timedelta  # local import to keep top clean
+        from datetime import date, timedelta
 
         with app.app_context():
-            # 1) Create tables if they don't exist (safe for Postgres)
+            # 1) Create tables if they don't exist
             db.create_all()
 
-            # IMPORTANT:
-            # db.create_all() НЕ добавляет новые колонки в уже существующие таблицы.
-            # Для изменения структуры продовой базы используйте миграции или SQL в Supabase.
+            # create_all НЕ добавляет колонки в существующие таблицы.
+            # Структуру Postgres меняем SQL-миграциями в Supabase.
 
             if not seed:
                 return
 
-            # 2) SEED DATA (RUN ONCE MANUALLY)
+            # 2) SEED DATA (ONLY WHEN INIT_DB=1)
 
-            # --- admin ---
             admin = User.query.filter_by(username="admin").first()
             if admin is None:
                 admin = User(username="admin", role="admin")
@@ -138,18 +142,12 @@ def create_app():
                 db.session.add(admin)
                 db.session.commit()
 
-            # --- client ---
             c = Client.query.first()
             if c is None:
-                c = Client(
-                    name="Проверка 121212",
-                    full_name="ТОО Проверка",
-                    comment="проверка"
-                )
+                c = Client(name="Проверка 121212", full_name="ТОО Проверка", comment="проверка")
                 db.session.add(c)
                 db.session.commit()
 
-            # --- AGZS ---
             agzs_names = [
                 "Жангельдина", "Ст город", "Капал батыр", "Миг",
                 "Основная - База", "Сан Ойл", "Шнос", "Сайман",
@@ -167,7 +165,6 @@ def create_app():
                     db.session.add(a)
             db.session.commit()
 
-            # --- CONTRACT (создаём только если нет ни одного) ---
             contract = Contract.query.first()
             if contract is None:
                 contract = Contract(
@@ -184,7 +181,6 @@ def create_app():
                 db.session.add(contract)
                 db.session.commit()
 
-            # --- BALANCE ---
             bal = Balance.query.filter_by(client_id=c.id, contract_id=contract.id).first()
             if bal is None:
                 bal = Balance(
@@ -197,7 +193,6 @@ def create_app():
                 db.session.add(bal)
                 db.session.commit()
 
-            # --- TALONS (пример: создадим 4, если талонов вообще нет) ---
             if Talon.query.count() == 0:
                 today = datetime.utcnow().date()
                 till = (datetime.utcnow() + timedelta(days=60)).date()
@@ -228,10 +223,10 @@ def create_app():
 
                 db.session.commit()
 
-    # Всегда безопасно создаём таблицы (без вставок)
+    # ✅ всегда безопасно создаём таблицы
     init_db(seed=False)
 
-    # Если нужно ОДИН РАЗ засеять данными — включи INIT_DB=1 в Railway env и перезапусти
+    # ✅ если надо один раз “засеять” — ставишь INIT_DB=1 и перезапускаешь
     if os.getenv("INIT_DB", "0") == "1":
         init_db(seed=True)
 
@@ -241,5 +236,4 @@ def create_app():
 app = create_app()
 
 if __name__ == "__main__":
-    # локальный запуск
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)

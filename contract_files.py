@@ -2,12 +2,19 @@ import os
 from uuid import uuid4
 from werkzeug.utils import secure_filename
 
-from flask import Blueprint, request, redirect, flash, current_app, url_for
+from supabase import create_client
+from flask import Blueprint, request, redirect, flash
 from flask_login import login_required
 
 from models import db, Contract, ContractFile
 
 contract_files_bp = Blueprint("contract_files", __name__)
+
+
+def sb():
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    return create_client(url, key)
 
 
 @contract_files_bp.post("/contracts/<int:contract_id>/files/upload")
@@ -27,29 +34,30 @@ def upload_contract_file(contract_id: int):
         return redirect(request.referrer)
 
     original = f.filename
-    safe_name = secure_filename(original)
+    safe = secure_filename(original)
 
-    if not safe_name.lower().endswith(".pdf"):
+    if not safe.lower().endswith(".pdf"):
         flash("Можно загружать только PDF", "error")
         return redirect(request.referrer)
 
-    # папка на диск: uploads/contracts/<contract_id>/
-    base_dir = os.path.join(current_app.config["UPLOAD_ROOT"], "contracts", str(contract.id))
-    os.makedirs(base_dir, exist_ok=True)
+    bucket = "contracts"
+    storage_key = f"contract/{contract.id}/{uuid4().hex}.pdf"
 
-    stored_name = f"{uuid4().hex}.pdf"
-    full_path = os.path.join(base_dir, stored_name)
-    f.save(full_path)
+    content = f.read()
+    sb().storage.from_(bucket).upload(
+        path=storage_key,
+        file=content,
+        file_options={"content-type": "application/pdf"}
+    )
 
-    # Если загружаем основной договор — оставляем только 1 файл kind='contract'
+    # если основной договор — оставляем только 1
     if kind == "contract":
         olds = ContractFile.query.filter_by(contract_id=contract.id, kind="contract").all()
         for old in olds:
-            # удалить файл с диска
-            old_path = os.path.join(base_dir, os.path.basename(old.storage_path))
+            # удаляем из storage
             try:
-                if os.path.exists(old_path):
-                    os.remove(old_path)
+                if old.storage_key:
+                    sb().storage.from_(old.bucket or bucket).remove([old.storage_key])
             except Exception:
                 pass
             db.session.delete(old)
@@ -58,7 +66,9 @@ def upload_contract_file(contract_id: int):
         contract_id=contract.id,
         kind=kind,
         title="Основной договор" if kind == "contract" else "Доп. соглашение",
-        storage_path=stored_name,     # храним только имя файла
+        bucket=bucket,
+        storage_key=storage_key,
+        storage_path=storage_key,   # можно так, чтобы старый код не ломался
         original_name=original
     )
     db.session.add(row)
@@ -73,12 +83,9 @@ def upload_contract_file(contract_id: int):
 def delete_contract_file(file_id: int):
     row = ContractFile.query.get_or_404(file_id)
 
-    base_dir = os.path.join(current_app.config["UPLOAD_ROOT"], "contracts", str(row.contract_id))
-    full_path = os.path.join(base_dir, os.path.basename(row.storage_path))
-
     try:
-        if os.path.exists(full_path):
-            os.remove(full_path)
+        if row.storage_key:
+            sb().storage.from_(row.bucket or "contracts").remove([row.storage_key])
     except Exception:
         pass
 

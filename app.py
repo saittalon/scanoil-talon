@@ -1,11 +1,16 @@
 import os
+from datetime import datetime
+
 from flask import Flask, redirect, url_for, request, jsonify, render_template
 from flask_login import LoginManager
 from sqlalchemy import text
-from datetime import date, datetime
 
 from config import Config
-from models import db, User, Client, Contract, Balance, Talon, AGZS, BotSession, TalonRedemption, WebAppToken
+from models import (
+    db,
+    User, Client, Contract, Balance, Talon, AGZS,
+    BotSession, TalonRedemption, WebAppToken
+)
 
 from auth import auth_bp
 from clients import clients_bp
@@ -54,7 +59,10 @@ def create_app():
             return jsonify({"ok": False, "error": "token_expired"}), 401
 
         # active bot session
-        sess = BotSession.query.filter_by(telegram_user_id=t.telegram_user_id, is_active=True).first()
+        sess = BotSession.query.filter_by(
+            telegram_user_id=t.telegram_user_id,
+            is_active=True
+        ).first()
         if sess is None:
             return jsonify({"ok": False, "error": "not_logged_in"}), 401
 
@@ -101,39 +109,32 @@ def create_app():
             "agzs": sess.agzs.name if sess.agzs else None
         })
 
-
-    def init_db():
-        from datetime import date, datetime, timedelta
+    # ---------------- DB init (SAFE) ----------------
+    def init_db(seed: bool = False):
+        """
+        SAFE MODE (default): only creates missing tables, DOES NOT insert data.
+        SEED MODE: inserts initial admin/agzs/client/etc. Run ONLY when INIT_DB=1.
+        """
+        from datetime import date, timedelta  # local import to keep top clean
 
         with app.app_context():
+            # 1) Create tables if they don't exist (safe for Postgres)
             db.create_all()
 
-            # --- lightweight auto-migration ---
-            try:
-                cols = [r[1] for r in db.session.execute(
-                    text("PRAGMA table_info(talon)")
-                ).fetchall()]
+            # IMPORTANT:
+            # db.create_all() НЕ добавляет новые колонки в уже существующие таблицы.
+            # Для изменения структуры продовой базы используйте миграции или SQL в Supabase.
 
-                if "used_agzs_id" not in cols:
-                    db.session.execute(
-                        text("ALTER TABLE talon ADD COLUMN used_agzs_id INTEGER")
-                    )
+            if not seed:
+                return
 
-                if "used_telegram_user_id" not in cols:
-                    db.session.execute(
-                        text("ALTER TABLE talon ADD COLUMN used_telegram_user_id VARCHAR(50)")
-                    )
-
-                db.session.commit()
-
-            except Exception:
-                db.session.rollback()
+            # 2) SEED DATA (RUN ONCE MANUALLY)
 
             # --- admin ---
             admin = User.query.filter_by(username="admin").first()
             if admin is None:
                 admin = User(username="admin", role="admin")
-                admin.set_password("admin123")
+                admin.set_password(os.getenv("ADMIN_PASSWORD", "admin123"))
                 db.session.add(admin)
                 db.session.commit()
 
@@ -159,76 +160,86 @@ def create_app():
                 "Кайтпас - Толеметова",
                 "Алмаз",
             ]
-
             for name in agzs_names:
                 if AGZS.query.filter_by(name=name).first() is None:
                     a = AGZS(name=name, login=name, is_active=True)
                     a.set_password(f"{name}123")
                     db.session.add(a)
-
             db.session.commit()
 
-            # --- CONTRACT ---
-            contract = Contract(
-                client_id=c.id,
-                number="проверка от 28.01.2026",
-                date_from=date(2026, 1, 28),
-                date_to=date(2026, 12, 31),
-                tariff_name="Газ 102тг",
-                price_per_liter=102.0,
-                online=True,
-                allow_all_stations=False,
-                forbidden_groups="МурАз (Туркестанская обл.)"
-            )
-            db.session.add(contract)
-            db.session.commit()
+            # --- CONTRACT (создаём только если нет ни одного) ---
+            contract = Contract.query.first()
+            if contract is None:
+                contract = Contract(
+                    client_id=c.id,
+                    number="проверка от 28.01.2026",
+                    date_from=date(2026, 1, 28),
+                    date_to=date(2026, 12, 31),
+                    tariff_name="Газ 102тг",
+                    price_per_liter=102.0,
+                    online=True,
+                    allow_all_stations=False,
+                    forbidden_groups="МурАз (Туркестанская обл.)"
+                )
+                db.session.add(contract)
+                db.session.commit()
 
             # --- BALANCE ---
-            bal = Balance(
-                client_id=c.id,
-                contract_id=contract.id,
-                product_name="ГАЗ",
-                liters_left=50.0,
-                balance_control=True
-            )
-            db.session.add(bal)
-
-            # --- TALONS ---
-            today = datetime.utcnow().date()
-            till = (datetime.utcnow() + timedelta(days=60)).date()
-
-            for i in range(4):
-                is_used = i < 2
-                used_at = (
-                    datetime(2026, 2, 10, 12, 30, 0) if i == 0
-                    else datetime(2026, 2, 18, 9, 15, 0) if i == 1
-                    else None
-                )
-
-                t = Talon(
+            bal = Balance.query.filter_by(client_id=c.id, contract_id=contract.id).first()
+            if bal is None:
+                bal = Balance(
                     client_id=c.id,
                     contract_id=contract.id,
-                    holder_name=c.name,
                     product_name="ГАЗ",
-                    liters=10.0,
-                    serial_number=str(i + 1).zfill(5),
-                    code=str(1800000000 + i * 12345),
-                    valid_from=today,
-                    valid_to=till,
-                    state="used" if is_used else "active",
-                    used_at=used_at,
-                    used_by_user_id=admin.id if is_used else None
+                    liters_left=50.0,
+                    balance_control=True
                 )
+                db.session.add(bal)
+                db.session.commit()
 
-                db.session.add(t)
+            # --- TALONS (пример: создадим 4, если талонов вообще нет) ---
+            if Talon.query.count() == 0:
+                today = datetime.utcnow().date()
+                till = (datetime.utcnow() + timedelta(days=60)).date()
 
-            db.session.commit()
+                for i in range(4):
+                    is_used = i < 2
+                    used_at = (
+                        datetime(2026, 2, 10, 12, 30, 0) if i == 0
+                        else datetime(2026, 2, 18, 9, 15, 0) if i == 1
+                        else None
+                    )
 
-    init_db()
+                    t = Talon(
+                        client_id=c.id,
+                        contract_id=contract.id,
+                        holder_name=c.name,
+                        product_name="ГАЗ",
+                        liters=10.0,
+                        serial_number=str(i + 1).zfill(5),
+                        code=str(1800000000 + i * 12345),
+                        valid_from=today,
+                        valid_to=till,
+                        state="used" if is_used else "active",
+                        used_at=used_at,
+                        used_by_user_id=admin.id if is_used else None
+                    )
+                    db.session.add(t)
+
+                db.session.commit()
+
+    # Всегда безопасно создаём таблицы (без вставок)
+    init_db(seed=False)
+
+    # Если нужно ОДИН РАЗ засеять данными — включи INIT_DB=1 в Railway env и перезапусти
+    if os.getenv("INIT_DB", "0") == "1":
+        init_db(seed=True)
+
     return app
 
 
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # локальный запуск
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)

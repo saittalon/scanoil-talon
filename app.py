@@ -1,27 +1,35 @@
 import os
 from datetime import datetime
 
-from flask import Flask, redirect, url_for, request, jsonify, render_template
-from flask_login import LoginManager
+from flask import (
+    Flask, redirect, url_for, request, jsonify, render_template,
+    send_from_directory, abort, current_app
+)
+from flask_login import LoginManager, login_required
 
 from config import Config
 from models import (
     db,
     User, Client, Contract, Balance, Talon, AGZS,
-    BotSession, TalonRedemption, WebAppToken
+    BotSession, TalonRedemption, WebAppToken,
+    ContractFile  # ✅ добавили
 )
 
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
 
-# ✅ ВАЖНО: подключаем файлы договоров (PDF)
+# ✅ Файлы договоров (PDF) — блюпринт
 from contract_files import contract_files_bp
 
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    # ✅ куда сохраняем PDF (папка рядом с app.py)
+    app.config["UPLOAD_ROOT"] = os.path.join(app.root_path, "uploads")
+    os.makedirs(os.path.join(app.config["UPLOAD_ROOT"], "contracts"), exist_ok=True)
 
     db.init_app(app)
 
@@ -37,13 +45,51 @@ def create_app():
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
     app.register_blueprint(reports_bp)
-
-    # ✅ Файлы договоров (PDF)
     app.register_blueprint(contract_files_bp)
 
     @app.get("/")
     def home():
         return redirect(url_for("clients.list_clients"))
+
+    # ✅ отдаём PDF (чтобы по ссылке открывался в браузере)
+    @app.get("/files/contracts/<int:file_id>")
+    @login_required
+    def download_contract_file(file_id: int):
+        f = ContractFile.query.get_or_404(file_id)
+
+        base_dir = os.path.join(
+            current_app.config["UPLOAD_ROOT"],
+            "contracts",
+            str(f.contract_id)
+        )
+        full_path = os.path.join(base_dir, os.path.basename(f.storage_path))
+
+        # На случай если в базе хранится только имя файла:
+        # если storage_path = "xxxx.pdf" -> ok
+        # если storage_path = "uploads/contracts/12/xxxx.pdf" -> возьмём basename
+        if not os.path.exists(full_path):
+            # fallback: если storage_path уже абсолют/относительный путь
+            alt = f.storage_path
+            if not os.path.isabs(alt):
+                alt = os.path.join(app.root_path, alt)
+            if os.path.exists(alt):
+                base_dir = os.path.dirname(alt)
+                filename = os.path.basename(alt)
+                return send_from_directory(
+                    base_dir,
+                    filename,
+                    as_attachment=False,
+                    download_name=f.original_name or filename
+                )
+            abort(404)
+
+        filename = os.path.basename(full_path)
+        return send_from_directory(
+            base_dir,
+            filename,
+            as_attachment=False,
+            download_name=f.original_name or filename
+        )
 
     # ---------------- Telegram WebApp (QR scanner) ----------------
     @app.get("/tg/scan")
@@ -124,16 +170,10 @@ def create_app():
         from datetime import date, timedelta
 
         with app.app_context():
-            # 1) Create tables if they don't exist
             db.create_all()
-
-            # create_all НЕ добавляет колонки в существующие таблицы.
-            # Структуру Postgres меняем SQL-миграциями в Supabase.
 
             if not seed:
                 return
-
-            # 2) SEED DATA (ONLY WHEN INIT_DB=1)
 
             admin = User.query.filter_by(username="admin").first()
             if admin is None:
@@ -205,7 +245,7 @@ def create_app():
                         else None
                     )
 
-                    t = Talon(
+                    tln = Talon(
                         client_id=c.id,
                         contract_id=contract.id,
                         holder_name=c.name,
@@ -219,14 +259,12 @@ def create_app():
                         used_at=used_at,
                         used_by_user_id=admin.id if is_used else None
                     )
-                    db.session.add(t)
+                    db.session.add(tln)
 
                 db.session.commit()
 
-    # ✅ всегда безопасно создаём таблицы
     init_db(seed=False)
 
-    # ✅ если надо один раз “засеять” — ставишь INIT_DB=1 и перезапускаешь
     if os.getenv("INIT_DB", "0") == "1":
         init_db(seed=True)
 

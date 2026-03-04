@@ -3,16 +3,17 @@ from datetime import datetime
 
 from flask import (
     Flask, redirect, url_for, request, jsonify, render_template,
-    send_from_directory, abort, current_app
+    abort, current_app
 )
 from flask_login import LoginManager, login_required
+from supabase import create_client
 
 from config import Config
 from models import (
     db,
     User, Client, Contract, Balance, Talon, AGZS,
     BotSession, TalonRedemption, WebAppToken,
-    ContractFile  # ✅ добавили
+    ContractFile
 )
 
 from auth import auth_bp
@@ -26,10 +27,6 @@ from contract_files import contract_files_bp
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
-
-    # ✅ куда сохраняем PDF (папка рядом с app.py)
-    app.config["UPLOAD_ROOT"] = os.path.join(app.root_path, "uploads")
-    os.makedirs(os.path.join(app.config["UPLOAD_ROOT"], "contracts"), exist_ok=True)
 
     db.init_app(app)
 
@@ -51,45 +48,33 @@ def create_app():
     def home():
         return redirect(url_for("clients.list_clients"))
 
-    # ✅ отдаём PDF (чтобы по ссылке открывался в браузере)
+    # ✅ Открытие PDF через Supabase Storage (signed url)
     @app.get("/files/contracts/<int:file_id>")
     @login_required
     def download_contract_file(file_id: int):
         f = ContractFile.query.get_or_404(file_id)
 
-        base_dir = os.path.join(
-            current_app.config["UPLOAD_ROOT"],
-            "contracts",
-            str(f.contract_id)
-        )
-        full_path = os.path.join(base_dir, os.path.basename(f.storage_path))
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-        # На случай если в базе хранится только имя файла:
-        # если storage_path = "xxxx.pdf" -> ok
-        # если storage_path = "uploads/contracts/12/xxxx.pdf" -> возьмём basename
-        if not os.path.exists(full_path):
-            # fallback: если storage_path уже абсолют/относительный путь
-            alt = f.storage_path
-            if not os.path.isabs(alt):
-                alt = os.path.join(app.root_path, alt)
-            if os.path.exists(alt):
-                base_dir = os.path.dirname(alt)
-                filename = os.path.basename(alt)
-                return send_from_directory(
-                    base_dir,
-                    filename,
-                    as_attachment=False,
-                    download_name=f.original_name or filename
-                )
+        if not supabase_url or not supabase_key:
+            abort(500, description="SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set")
+
+        sb = create_client(supabase_url, supabase_key)
+
+        bucket = getattr(f, "bucket", None) or "contracts"
+        key = getattr(f, "storage_key", None) or getattr(f, "storage_path", None)
+
+        if not key:
             abort(404)
 
-        filename = os.path.basename(full_path)
-        return send_from_directory(
-            base_dir,
-            filename,
-            as_attachment=False,
-            download_name=f.original_name or filename
-        )
+        signed = sb.storage.from_(bucket).create_signed_url(key, 60)
+        signed_url = signed.get("signedURL") or signed.get("signedUrl")
+
+        if not signed_url:
+            abort(404)
+
+        return redirect(signed_url)
 
     # ---------------- Telegram WebApp (QR scanner) ----------------
     @app.get("/tg/scan")

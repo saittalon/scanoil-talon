@@ -1,162 +1,88 @@
 import os
-import uuid
-from datetime import timedelta, datetime
+from uuid import uuid4
+from werkzeug.utils import secure_filename
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
+from flask import Blueprint, request, redirect, flash, current_app, url_for
 from flask_login import login_required
-from supabase import create_client
 
 from models import db, Contract, ContractFile
 
 contract_files_bp = Blueprint("contract_files", __name__)
 
-def get_supabase():
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key:
-        raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY is not set")
-    return create_client(url, key)
-
-def get_bucket():
-    return os.getenv("SUPABASE_STORAGE_BUCKET", "contracts")
-
-def _build_storage_path(contract_id: int, original_name: str) -> str:
-    ext = ""
-    if "." in original_name:
-        ext = "." + original_name.rsplit(".", 1)[1].lower()
-    fname = f"{uuid.uuid4().hex}{ext}"
-    # пример: contracts/contract_12/addon/uuid.pdf  (но bucket уже contracts, поэтому внутри bucket путь такой)
-    return f"contract_{contract_id}/{fname}"
-
-@contract_files_bp.get("/contracts/<int:contract_id>/files")
-@login_required
-def contract_files(contract_id: int):
-    contract = Contract.query.get_or_404(contract_id)
-    files = (ContractFile.query
-             .filter_by(contract_id=contract_id)
-             .order_by(ContractFile.created_at.desc())
-             .all())
-    return render_template("contract_files.html", contract=contract, files=files)
 
 @contract_files_bp.post("/contracts/<int:contract_id>/files/upload")
 @login_required
 def upload_contract_file(contract_id: int):
     contract = Contract.query.get_or_404(contract_id)
 
-    kind = (request.form.get("kind") or "attachment").strip()
-    title = (request.form.get("title") or "").strip()
-
     f = request.files.get("file")
-    if not f or not f.filename:
+    kind = (request.form.get("kind") or "").strip()  # contract / addendum
+
+    if not f or f.filename == "":
         flash("Файл не выбран", "error")
-        return redirect(url_for("contract_files.contract_files", contract_id=contract_id))
+        return redirect(request.referrer)
 
-    # только PDF
-    if not f.filename.lower().endswith(".pdf"):
-        flash("Можно загрузить только PDF", "error")
-        return redirect(url_for("contract_files.contract_files", contract_id=contract_id))
+    if kind not in ("contract", "addendum"):
+        flash("Неверный тип файла", "error")
+        return redirect(request.referrer)
 
-    supabase = get_supabase()
-    bucket = get_bucket()
+    original = f.filename
+    safe_name = secure_filename(original)
 
-    storage_path = _build_storage_path(contract_id, f.filename)
+    if not safe_name.lower().endswith(".pdf"):
+        flash("Можно загружать только PDF", "error")
+        return redirect(request.referrer)
 
-    # upload
-    data = f.read()
-    supabase.storage.from_(bucket).upload(
-        storage_path,
-        data,
-        {"content-type": "application/pdf", "upsert": "false"}
-    )
+    # папка на диск: uploads/contracts/<contract_id>/
+    base_dir = os.path.join(current_app.config["UPLOAD_ROOT"], "contracts", str(contract.id))
+    os.makedirs(base_dir, exist_ok=True)
+
+    stored_name = f"{uuid4().hex}.pdf"
+    full_path = os.path.join(base_dir, stored_name)
+    f.save(full_path)
+
+    # Если загружаем основной договор — оставляем только 1 файл kind='contract'
+    if kind == "contract":
+        olds = ContractFile.query.filter_by(contract_id=contract.id, kind="contract").all()
+        for old in olds:
+            # удалить файл с диска
+            old_path = os.path.join(base_dir, os.path.basename(old.storage_path))
+            try:
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            except Exception:
+                pass
+            db.session.delete(old)
 
     row = ContractFile(
-        contract_id=contract_id,
+        contract_id=contract.id,
         kind=kind,
-        title=title or None,
-        storage_path=storage_path,
-        original_name=f.filename
+        title="Основной договор" if kind == "contract" else "Доп. соглашение",
+        storage_path=stored_name,     # храним только имя файла
+        original_name=original
     )
     db.session.add(row)
     db.session.commit()
 
-    flash("Файл загружен", "success")
-    return redirect(url_for("contract_files.contract_files", contract_id=contract_id))
+    flash("PDF загружен", "success")
+    return redirect(request.referrer)
 
-@contract_files_bp.get("/contract-files/<int:file_id>/view")
-@login_required
-def view_contract_file(file_id: int):
-    cf = ContractFile.query.get_or_404(file_id)
 
-    supabase = get_supabase()
-    bucket = get_bucket()
-
-    # signed url на 1 час
-    signed = supabase.storage.from_(bucket).create_signed_url(cf.storage_path, 3600)
-    url = signed.get("signedURL") or signed.get("signedUrl") or signed.get("signed_url")
-    if not url:
-        abort(404)
-
-    # отдаём страницу с iframe
-    return render_template("contract_file_view.html", cf=cf, signed_url=url)
-
-@contract_files_bp.post("/contract-files/<int:file_id>/delete")
+@contract_files_bp.post("/contracts/files/<int:file_id>/delete")
 @login_required
 def delete_contract_file(file_id: int):
-    cf = ContractFile.query.get_or_404(file_id)
-    contract_id = cf.contract_id
+    row = ContractFile.query.get_or_404(file_id)
 
-    supabase = get_supabase()
-    bucket = get_bucket()
+    base_dir = os.path.join(current_app.config["UPLOAD_ROOT"], "contracts", str(row.contract_id))
+    full_path = os.path.join(base_dir, os.path.basename(row.storage_path))
 
-    # удаляем из storage (если не удалится — всё равно удалим запись)
     try:
-        supabase.storage.from_(bucket).remove([cf.storage_path])
+        if os.path.exists(full_path):
+            os.remove(full_path)
     except Exception:
         pass
 
-    db.session.delete(cf)
+    db.session.delete(row)
     db.session.commit()
-
     flash("Файл удалён", "success")
-    return redirect(url_for("contract_files.contract_files", contract_id=contract_id))
-
-@contract_files_bp.post("/contract-files/<int:file_id>/replace")
-@login_required
-def replace_contract_file(file_id: int):
-    cf = ContractFile.query.get_or_404(file_id)
-    contract_id = cf.contract_id
-
-    f = request.files.get("file")
-    if not f or not f.filename:
-        flash("Файл не выбран", "error")
-        return redirect(url_for("contract_files.contract_files", contract_id=contract_id))
-
-    if not f.filename.lower().endswith(".pdf"):
-        flash("Можно загрузить только PDF", "error")
-        return redirect(url_for("contract_files.contract_files", contract_id=contract_id))
-
-    supabase = get_supabase()
-    bucket = get_bucket()
-
-    # кладём новую версию в новый путь
-    new_path = _build_storage_path(contract_id, f.filename)
-    data = f.read()
-    supabase.storage.from_(bucket).upload(
-        new_path,
-        data,
-        {"content-type": "application/pdf", "upsert": "false"}
-    )
-
-    # удаляем старый файл
-    try:
-        supabase.storage.from_(bucket).remove([cf.storage_path])
-    except Exception:
-        pass
-
-    cf.storage_path = new_path
-    cf.original_name = f.filename
-    cf.updated_at = datetime.utcnow()
-    db.session.commit()
-
-    flash("Файл заменён", "success")
-    return redirect(url_for("contract_files.contract_files", contract_id=contract_id))
+    return redirect(request.referrer)

@@ -14,17 +14,10 @@ contract_files_bp = Blueprint("contract_files", __name__)
 import os
 from supabase import create_client
 
-def sb():
-    url = "https://amfzsjnanjzgqfyeqxth.supabase.co"  # <-- временно
-    key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-    print("SUPABASE_URL =", url)
-    print("SUPABASE_KEY_SET =", bool(key))
-
-    if not key:
-        raise Exception("SUPABASE_SERVICE_ROLE_KEY not set")
-
-    return create_client(url, key)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @contract_files_bp.post("/contracts/<int:contract_id>/files/upload")
 @login_required
@@ -53,7 +46,7 @@ def upload_contract_file(contract_id: int):
     storage_key = f"contract/{contract.id}/{uuid4().hex}.pdf"
 
     content = f.read()
-    sb().storage.from_(bucket).upload(
+    supabase.storage.from_(bucket).upload(
         path=storage_key,
         file=content,
         file_options={"content-type": "application/pdf"}

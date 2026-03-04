@@ -11,15 +11,28 @@ from models import db, Contract, ContractFile
 contract_files_bp = Blueprint("contract_files", __name__)
 
 
+import os
+from supabase import create_client
+from flask import current_app
+
 def sb():
     url = (os.getenv("SUPABASE_URL") or "").strip()
     key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
 
-    print("SUPABASE_URL=", repr(url))
-    print("SUPABASE_KEY_SET=", bool(key), "len=", len(key))
+    # ✅ лог в Railway будет точно (через logger, не print)
+    try:
+        current_app.logger.error("SUPABASE_URL=%r", url)
+        current_app.logger.error("SUPABASE_KEY_SET=%s len=%s", bool(key), len(key))
+    except Exception:
+        pass
+
+    # ✅ если пусто — сразу понятная ошибка, а не DNS
+    if not url:
+        raise RuntimeError("SUPABASE_URL is empty (Railway Variables not applied)")
+    if not key:
+        raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY is empty")
 
     return create_client(url, key)
-
 
 @contract_files_bp.post("/contracts/<int:contract_id>/files/upload")
 @login_required

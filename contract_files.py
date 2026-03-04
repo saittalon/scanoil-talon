@@ -15,14 +15,11 @@ import os
 from supabase import create_client
 
 def sb():
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    url = "https://amfzsjanjzqgfyeqxth.supabase.co"  # <-- временно
+    key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
 
     print("SUPABASE_URL =", url)
     print("SUPABASE_KEY_SET =", bool(key))
-
-    if not url:
-        raise Exception("SUPABASE_URL not set")
 
     if not key:
         raise Exception("SUPABASE_SERVICE_ROLE_KEY not set")

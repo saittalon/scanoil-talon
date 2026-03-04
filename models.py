@@ -89,6 +89,8 @@ class ContractFile(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    bucket = db.Column(db.String(100), nullable=False, default="contracts")
+storage_key = db.Column(db.String(500), nullable=True)
 
 
 class Balance(db.Model):

@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Файлы договора</title>
+  <style>
+    body{font-family:Arial, sans-serif; padding:16px;}
+    .card{border:1px solid #ddd; border-radius:10px; padding:12px; margin-bottom:12px;}
+    .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap;}
+    .tag{padding:2px 8px; border:1px solid #ccc; border-radius:999px; font-size:12px;}
+    input, select{padding:8px;}
+    button{padding:8px 12px; cursor:pointer;}
+    a{color:#0b63ce; text-decoration:none;}
+  </style>
+</head>
+<body>
+
+<h2>Файлы договора № {{ contract.number }}</h2>
+
+<div class="card">
+  <form method="post" action="{{ url_for('contract_files.upload_contract_file', contract_id=contract.id) }}" enctype="multipart/form-data">
+    <div class="row">
+      <select name="kind">
+        <option value="contract">Договор</option>
+        <option value="addon">Доп. соглашение</option>
+        <option value="attachment" selected>Вложение</option>
+      </select>
+      <input name="title" placeholder="Название (например: Доп соглашение №1)" style="min-width:280px;">
+      <input type="file" name="file" accept="application/pdf" required>
+      <button type="submit">Загрузить PDF</button>
+    </div>
+  </form>
+</div>
+
+{% for f in files %}
+<div class="card">
+  <div class="row">
+    <span class="tag">{{ f.kind }}</span>
+    <b>{{ f.title or f.original_name or ('PDF #' ~ f.id) }}</b>
+    <span style="color:#666;">(обновлено: {{ f.updated_at }})</span>
+  </div>
+
+  <div class="row" style="margin-top:8px;">
+    <a href="{{ url_for('contract_files.view_contract_file', file_id=f.id) }}" target="_blank">Открыть / Просмотр</a>
+
+    <form method="post" action="{{ url_for('contract_files.replace_contract_file', file_id=f.id) }}" enctype="multipart/form-data">
+      <input type="file" name="file" accept="application/pdf" required>
+      <button type="submit">Заменить PDF</button>
+    </form>
+
+    <form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}" onsubmit="return confirm('Удалить файл?');">
+      <button type="submit">Удалить</button>
+    </form>
+  </div>
+</div>
+{% else %}
+<p>Файлов пока нет.</p>
+{% endfor %}
+
+<p>
+  <a href="{{ url_for('clients.client_contracts', client_id=contract.client_id) }}">← Назад к договорам</a>
+</p>
+
+</body>
+</html>

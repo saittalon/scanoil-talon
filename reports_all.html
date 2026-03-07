@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+{% set total_qty = rows|sum(attribute='Количество') %}
+{% set total_cost = rows|sum(attribute='Стоимость') %}
+{% set total_clients = rows|map(attribute='Клиент')|list|unique|list|length if rows else 0 %}
+
+<div class="page-hero">
+  <div class="hero-kicker">Общий отчёт</div>
+  <div class="hero-title">Реализация сжиженного газа и активность по всем клиентам</div>
+  <div class="hero-subtitle">Добавлен dashboard со статистикой и графиком. Теперь видно не только таблицу, но и общую картину реализации сжиженного газа.</div>
+</div>
+
+<div class="report-stat-grid mb-4">
+  <div class="metric-card"><div class="metric-label">Операции</div><div class="metric-value">{{ rows|length }}</div><div class="metric-foot">Использованные талоны</div></div>
+  <div class="metric-card"><div class="metric-label">Реализовано СУГ</div><div class="metric-value">{{ '%.0f'|format(total_qty) }} л</div><div class="metric-foot">Суммарный объём</div></div>
+  <div class="metric-card"><div class="metric-label">Сумма</div><div class="metric-value">{{ '%.0f'|format(total_cost) }} ₸</div><div class="metric-foot">Общая стоимость операций</div></div>
+</div>
+
+<div class="report-grid mb-4">
+  <div class="card card-soft section-card">
+    <div class="section-title">Фильтр периода</div>
+    <div class="section-subtitle">Общий отчёт строится по использованным талонам.</div>
+    <form class="row g-3" method="get" action="/reports/all">
+      <input type="hidden" name="preset" value="">
+      <div class="col-md-4">
+        <label class="form-label">Период (от)</label>
+        <input class="form-control" type="date" name="date_from" value="{{ date_from or '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Период (до)</label>
+        <input class="form-control" type="date" name="date_to" value="{{ date_to or '' }}">
+      </div>
+      <div class="col-md-4 d-flex align-items-end gap-2 flex-wrap">
+        <button class="btn btn-outline-secondary" type="submit">Показать</button>
+        <a class="btn btn-brand" href="/reports/all.xlsx?date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">Скачать Excel</a>
+      </div>
+    </form>
+  </div>
+  <div class="card card-soft section-card chart-card">
+    <div class="section-title">График реализации СУГ</div>
+    <div class="section-subtitle">Сумма литров по клиентам за выбранный период.</div>
+    <div class="chart-wrap"><canvas id="salesChart"></canvas></div>
+  </div>
+</div>
+
+<div class="card card-soft section-card">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <div class="section-title">Таблица операций</div>
+      <div class="section-subtitle mb-0">Детализация по дате, клиенту, объёму и стоимости.</div>
+    </div>
+    <span class="pill-stat">Клиентов в выборке: {{ total_clients }}</span>
+  </div>
+  <div class="table-shell">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th>Дата</th><th>Время</th><th>Владелец</th><th>Клиент</th><th>Операция</th>
+            <th>Услуга</th><th>Количество</th><th>Цена</th><th>Стоимость</th><th>АЗС</th><th>Адрес</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r["Дата"] }}</td>
+            <td>{{ r["Время"] }}</td>
+            <td>{{ r["Владелец"] }}</td>
+            <td>{{ r["Клиент"] }}</td>
+            <td>{{ r["Операция"] }}</td>
+            <td>{{ r["Услуга"] }}</td>
+            <td>{{ r["Количество"] }}</td>
+            <td>{{ r["Цена"] }}</td>
+            <td><b>{{ r["Стоимость"] }}</b></td>
+            <td>{{ r["АЗС"] }}</td>
+            <td>{{ r["Адрес"] }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="11" class="empty-state">Нет операций за выбранный период.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  const rawRows = {{ rows|tojson }};
+  const grouped = {};
+  rawRows.forEach(r => {
+    const key = r['Клиент'] || 'Без клиента';
+    grouped[key] = (grouped[key] || 0) + Number(r['Количество'] || 0);
+  });
+  const salesCtx = document.getElementById('salesChart');
+  if (salesCtx) {
+    new Chart(salesCtx, {
+      type: 'bar',
+      data: {
+        labels: Object.keys(grouped),
+        datasets: [{ label: 'Литры', data: Object.values(grouped), borderWidth: 0, borderRadius: 8 }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#dce8ff' } } },
+        scales: {
+          x: { ticks: { color: '#aebfe3' }, grid: { color: 'rgba(255,255,255,.05)' } },
+          y: { ticks: { color: '#aebfe3' }, grid: { color: 'rgba(255,255,255,.05)' } }
+        }
+      }
+    });
+  }
+</script>
+{% endblock %}

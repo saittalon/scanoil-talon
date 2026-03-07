@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_client_header.html" %}
+
+<div class="card card-soft">
+  <div class="card-body">
+    <div class="d-flex align-items-center justify-content-between gap-2">
+      <h5 class="mb-0">Талоны</h5>
+      <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addTalonsModal">Создать талоны</button>
+      <form class="d-flex flex-wrap align-items-end gap-2" method="get" action="{{ url_for('clients.client_talons', client_id=client.id) }}">
+        <div>
+          <label class="form-label mb-0"><small>Период с</small></label>
+          <input type="date" class="form-control form-control-sm" name="date_from" value="{{ date_from or '' }}">
+        </div>
+        <div>
+          <label class="form-label mb-0"><small>по</small></label>
+          <input type="date" class="form-control form-control-sm" name="date_to" value="{{ date_to or '' }}">
+        </div>
+        <button class="btn btn-outline-secondary btn-sm">Показать</button>
+        <a class="btn btn-outline-dark btn-sm"  href="{{ url_for('clients.print_talons_choose', client_id=client.id) }}">Печать (A4)</a>
+      </form>
+    </div>
+
+    <div class="table-responsive mt-3">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>№</th><th>Код</th><th>Услуга</th><th>Номинал</th><th>Период</th><th>Статус</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in talons %}
+          <tr>
+            <td>{{ t.serial_number }}</td>
+            <td>{{ t.code }}</td>
+            <td>
+              <a  href="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}">
+                <img alt="qr" src="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}" style="height:34px; width:34px;">
+              </a>
+            </td>
+            <td>{{ t.product_name }}</td>
+            <td>{{ t.liters }} л</td>
+            <td>{{ t.valid_from }} – {{ t.valid_to }}</td>
+            <td>
+              {% if t.state == 'used' %}
+                <span class="badge text-bg-secondary">Использован</span>
+              {% elif t.state == 'blocked' %}
+                <span class="badge text-bg-danger">Заблокирован</span>
+              {% else %}
+                <span class="badge text-bg-success">В работе</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if t.state == 'active' %}
+                <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
+                  <button class="btn btn-outline-primary btn-sm">Использовать</button>
+                </form>
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="addTalonsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Добавление талонов</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <form method="post" action="{{ url_for('clients.client_talons_add', client_id=client.id) }}">
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Договор</label>
+              {% if contracts|length == 0 %}
+                <div class="alert alert-warning mb-0">
+                  У этого клиента пока нет договоров. Сначала создай договор.
+                  <a class="ms-2" href="{{ url_for('clients.contract_new_get', client_id=client.id) }}">Создать договор</a>
+                </div>
+                <input type="hidden" id="contractSelect" name="contract_id" value="">
+              {% else %}
+                <select class="form-select" id="contractSelect" name="contract_id" required>
+                  <option value="">— выберите —</option>
+                  {% for c in contracts %}
+                    <option value="{{ c.id }}" {% if loop.first %}selected{% endif %}>
+                      {{ c.number }} ({{ c.date_from }}{% if c.date_to %}–{{ c.date_to }}{% endif %})
+                    </option>
+                  {% endfor %}
+                </select>
+              {% endif %}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Кол-во талонов</label>
+              <input type="number" class="form-control" id="qtyInput" name="qty" value="1" min="1" step="1" required>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Номинал (л)</label>
+              <input type="number" class="form-control" id="litersInput" name="liters" value="10" min="0.01" step="0.01" required>
+            </div>
+          </div>
+          
+          <div class="mt-3 d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(5)">5 л</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(10)">10 л</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(20)">20 л</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(30)">30 л</button>
+          </div>
+          
+          <div class="row g-3 mt-1">
+            <div class="col-md-6">
+              <label class="form-label">Дата начала</label>
+              <input type="date" class="form-control" name="valid_from" value="{{ date_from or '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Дата окончания</label>
+              <input type="date" class="form-control" name="valid_to" value="{{ date_to or '' }}">
+            </div>
+          </div>
+          
+          <input type="hidden" name="product_name" value="ГАЗ">
+          <div id="balanceInfo" class="alert alert-light border mt-3 mb-0" style="display:none"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-success" id="submitTalonsBtn">Сохранить</button>
+          <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отменить</button>
+        </div>
+      </form>
+
+      <script>
+        const BALANCES = {{ balances_json|safe }};
+
+        function setLiters(x){
+          document.getElementById('litersInput').value = x.toString();
+          updateBalanceHint();
+        }
+
+        function numVal(id){
+          const v = (document.getElementById(id).value || "0").toString().replace(",", ".");
+          const n = parseFloat(v);
+          return isNaN(n) ? 0 : n;
+        }
+
+        function updateBalanceHint(){
+          const contractId = (document.getElementById('contractSelect').value || "").toString();
+          const info = document.getElementById('balanceInfo');
+          const btn = document.getElementById('submitTalonsBtn');
+
+          if(!contractId || !BALANCES[contractId]){
+            info.style.display = 'none';
+            btn.disabled = false;
+            return;
+          }
+
+          const b = BALANCES[contractId];
+          if(!b.balance_control){
+            info.className = 'alert alert-light border mb-0';
+            info.innerHTML = 'Баланс по договору не контролируется.';
+            info.style.display = 'block';
+            btn.disabled = false;
+            return;
+          }
+
+          const qty = Math.max(1, parseInt(numVal('qtyInput') || 1));
+          const liters = numVal('litersInput');
+          const need = qty * liters;
+          const left = parseFloat(b.liters_left || 0);
+
+          if(need > left){
+            info.className = 'alert alert-danger mb-0';
+            info.innerHTML = `Остаток меньше нужного: доступно <b>${left.toFixed(2)} л</b>, нужно <b>${need.toFixed(2)} л</b>.`;
+            info.style.display = 'block';
+            btn.disabled = true;
+          } else {
+            info.className = 'alert alert-success mb-0';
+            info.innerHTML = `Остаток по договору: <b>${left.toFixed(2)} л</b>. Будет списано: <b>${need.toFixed(2)} л</b>. Останется: <b>${(left-need).toFixed(2)} л</b>.`;
+            info.style.display = 'block';
+            btn.disabled = false;
+          }
+        }
+
+        const contractEl = document.getElementById('contractSelect');
+        const litersEl = document.getElementById('litersInput');
+        const qtyEl = document.getElementById('qtyInput');
+        if(contractEl) contractEl.addEventListener('change', updateBalanceHint);
+        if(litersEl) litersEl.addEventListener('input', updateBalanceHint);
+        if(qtyEl) qtyEl.addEventListener('input', updateBalanceHint);
+        updateBalanceHint();
+      </script>
+    </div>
+  </div>
+</div>
+{% endblock %}

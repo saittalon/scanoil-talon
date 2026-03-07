@@ -3,50 +3,57 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Вход — МурАз Talon CRM</title>
+  <title>Вход — МурАз CRM</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="{{ url_for('static', filename='styles.css') }}" rel="stylesheet">
 </head>
-<body class="bg-app">
+<body class="bg-app login-space">
 <div class="login-page">
   <div class="login-shell">
     <div class="login-side">
       <div>
         <div class="logo-badge mb-4"><img src="{{ url_for('static', filename='img/company_logo.png') }}" alt="МурАз"></div>
-        <div class="hero-kicker">SCAN OIL UPGRADE</div>
-        <div class="login-title mt-2">Современный кабинет для договоров, талонов и контроля остатков.</div>
-        <p class="login-caption mt-3">Новый интерфейс собран так, чтобы оператору было легче работать: быстрый доступ к клиентам, остаткам, документам договора и реализации СУГ.</p>
+        <div class="hero-kicker">MURAZ CRM</div>
+        <div class="login-title mt-2">Красивый кабинет для работы с договорами, талонами и реализацией СУГ.</div>
+        <p class="login-caption mt-3">Интерфейс сделан так, чтобы он выглядел заметно лучше старого ScanOil: тёмная тема, понятные карточки, остатки по клиентам, графики и быстрый доступ к документам договора.</p>
         <div class="feature-stack">
-          <div class="feature-item"><b>Панель статистики</b><span class="login-caption">Клиенты, активные талоны, использованные литры и контроль остатков на одном экране.</span></div>
-          <div class="feature-item"><b>Документы договора</b><span class="login-caption">Основной договор и дополнительные соглашения разложены по понятным блокам.</span></div>
-          <div class="feature-item"><b>Отчёты и графики</b><span class="login-caption">Реализацию СУГ и активность клиентов видно сразу, без лишних переходов.</span></div>
+          <div class="feature-item"><b>Dashboard</b><span class="login-caption">Клиенты, активные талоны, использованные литры и остатки по СУГ на одном экране.</span></div>
+          <div class="feature-item"><b>Документы договора</b><span class="login-caption">Основной договор и доп. соглашения вынесены в отдельный красивый блок.</span></div>
+          <div class="feature-item"><b>Графики и отчёты</b><span class="login-caption">Реализация сжиженного газа и активность клиентов видны сразу, без лишних переходов.</span></div>
         </div>
       </div>
-      <div class="small text-muted">МурАз Talon CRM • защищённый вход сотрудников</div>
+      <div class="small text-muted">МурАз CRM • защищённый вход сотрудников</div>
     </div>
 
-    <div class="login-card">
-      <div class="d-flex align-items-center gap-3 mb-3">
-        <div class="logo-badge"><img src="{{ url_for('static', filename='img/company_logo.png') }}" alt="МурАз"></div>
-        <div>
-          <h2 class="mb-1">Вход в систему</h2>
-          <div class="text-muted">Авторизация для операторов и администратора</div>
-        </div>
+    <div class="login-card login-card-center">
+      <div class="text-center mb-4">
+        <div class="logo-badge mx-auto mb-3"><img src="{{ url_for('static', filename='img/company_logo.png') }}" alt="МурАз"></div>
+        <h2 class="mb-1">Вход в систему</h2>
+        <div class="text-muted">Сжиженный газ • договоры • талоны • отчёты</div>
       </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category if category in ['success','warning','danger','info'] else 'info' }} mb-3">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
       <form method="post" action="/login" class="mt-4">
         <div class="mb-3">
-          <label class="form-label">Логин</label>
+          <label class="form-label">Имя пользователя</label>
           <input name="username" class="form-control" placeholder="Введите логин" required>
         </div>
         <div class="mb-3">
           <label class="form-label">Пароль</label>
           <input name="password" type="password" class="form-control" placeholder="Введите пароль" required>
         </div>
-        <button class="btn btn-brand w-100">Войти в кабинет</button>
-        <div class="mt-3 small text-muted">Тестовый вход: <b>admin</b> / <b>admin123</b></div>
+        <button class="btn btn-brand w-100 btn-lg">Войти</button>
+        <div class="mt-3 small text-muted text-center">Тестовый вход: <b>admin</b> / <b>admin123</b></div>
       </form>
     </div>
   </div>

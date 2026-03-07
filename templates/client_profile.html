@@ -1,19 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
 {% include "_client_header.html" %}
-
-<div class="page-hero">
-  <div class="hero-kicker">Профиль клиента</div>
-  <div class="hero-title">Основные реквизиты и контактные данные</div>
-  <div class="hero-subtitle">Страница профиля тоже переведена в новый стиль: ключевые данные разбиты по карточкам, а важная информация читается легче.</div>
-</div>
-
-<div class="info-grid">
-  <div class="info-card"><h6>Полное название</h6><div class="info-value fs-5">{{ client.full_name or client.name }}</div></div>
-  <div class="info-card"><h6>БИН</h6><div class="info-value fs-4">{{ client.bin or '—' }}</div></div>
-  <div class="info-card"><h6>E-mail</h6><div class="info-value fs-5">{{ client.email or '—' }}</div></div>
-  <div class="info-card"><h6>Телефон</h6><div class="info-value fs-5">{{ client.phone or '—' }}</div></div>
-  <div class="info-card"><h6>Юридический адрес</h6><div>{{ client.legal_address or '—' }}</div></div>
-  <div class="info-card"><h6>Комментарий</h6><div>{{ client.comment or '—' }}</div></div>
+<div class="card card-soft">
+  <div class="card-body">
+    <h5 class="mb-3">Профиль</h5>
+    <div class="row g-3">
+      <div class="col-md-6"><div class="text-muted small">БИН</div><div>{{ client.bin or "-" }}</div></div>
+      <div class="col-md-6"><div class="text-muted small">E-mail</div><div>{{ client.email or "-" }}</div></div>
+      <div class="col-md-6"><div class="text-muted small">Телефон</div><div>{{ client.phone or "-" }}</div></div>
+      <div class="col-md-6"><div class="text-muted small">Юр. адрес</div><div>{{ client.legal_address or "-" }}</div></div>
+      <div class="col-12"><div class="text-muted small">Комментарий</div><div>{{ client.comment or "-" }}</div></div>
+    </div>
+  </div>
 </div>
 {% endblock %}

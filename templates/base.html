@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title or "МурАз CRM — СУГ" }}</title>
+  <title>{{ title or "MurAz CRM — СУГ" }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -12,44 +12,79 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-app">
-<nav class="navbar navbar-expand-lg navbar-glass sticky-top">
-  <div class="container-fluid px-4 py-2">
-    <a class="navbar-brand d-flex align-items-center gap-3" href="/clients">
-      <span class="brand-logo-wrap"><img src="{{ url_for('static', filename='img/company_logo.png') }}" alt="МурАз"></span>
-      <span>
-        <span class="fw-bold d-block">МурАз CRM</span>
-        <span class="brand-subtitle d-block">Сжиженный газ, договоры, талоны и аналитика</span>
-      </span>
-    </a>
-
-    <form class="d-none d-lg-flex ms-3 flex-grow-1" role="search">
-      <div class="search-wrap w-100 position-relative">
-        <input class="form-control search-input" type="search" placeholder="Поиск по клиентам, договорам и документам" aria-label="Search" disabled>
+<div class="app-shell">
+  <aside class="sidebar-shell">
+    <div class="sidebar-brand">
+      <div class="brand-logo-wrap lg"><img src="{{ url_for('static', filename='img/company_logo.png') }}" alt="МурАз"></div>
+      <div>
+        <div class="brand-title">MurAz CRM</div>
+        <div class="brand-subtitle">Система управления СУГ</div>
       </div>
-    </form>
-
-    <div class="ms-auto d-flex align-items-center gap-2 gap-md-3 flex-wrap">
-      <a class="btn btn-link text-decoration-none small" href="/clients">Клиенты</a>
-      <a class="btn btn-link text-decoration-none small" href="/reports">Отчёты</a>
-      <span class="small text-muted d-none d-md-inline">{{ current_user.username if current_user.is_authenticated else '' }}</span>
-      {% if current_user.is_authenticated %}
-      <a class="btn btn-outline-secondary btn-sm" href="/logout">Выход</a>
-      {% endif %}
     </div>
+
+    <div class="sidebar-search">
+      <input class="form-control" type="text" value="" placeholder="Поиск по клиентам" disabled>
+    </div>
+
+    <div class="sidebar-group-label">Навигация</div>
+    <nav class="sidebar-nav">
+      <a class="sidebar-link {{ 'active' if request.path.startswith('/clients') else '' }}" href="/clients">Dashboard / Клиенты</a>
+      <a class="sidebar-link {{ 'active' if request.path.startswith('/reports') else '' }}" href="/reports">Аналитика и отчёты</a>
+      <a class="sidebar-link" href="/clients/new">Новый клиент</a>
+    </nav>
+
+    <div class="sidebar-group-label mt-4">Возможности</div>
+    <div class="sidebar-note-list">
+      <div class="sidebar-note">
+        <b>Реализация СУГ</b>
+        <span>Графики, суммы и литры по клиентам на одной панели.</span>
+      </div>
+      <div class="sidebar-note">
+        <b>Договоры и PDF</b>
+        <span>Основной договор и доп. соглашения разложены по отдельным блокам.</span>
+      </div>
+      <div class="sidebar-note">
+        <b>Остатки</b>
+        <span>Контроль лимитов и быстрые пополнения для газовых талонов.</span>
+      </div>
+    </div>
+
+    <div class="sidebar-user mt-auto">
+      <div class="user-chip">
+        <div class="user-avatar">{{ (current_user.username[0] if current_user and current_user.username else 'A')|upper }}</div>
+        <div>
+          <div class="fw-semibold">{{ current_user.username }}</div>
+          <div class="brand-subtitle">{{ 'Администратор' if current_user.role == 'admin' else 'Оператор' }}</div>
+        </div>
+      </div>
+      <a class="btn btn-outline-secondary w-100 mt-3" href="/logout">Выйти</a>
+    </div>
+  </aside>
+
+  <div class="main-shell">
+    <header class="topbar-shell">
+      <div>
+        <div class="topbar-kicker">Внутренняя система компании</div>
+        <div class="topbar-title">Договоры, талоны и реализация сжиженного газа</div>
+      </div>
+      <div class="topbar-actions">
+        <a class="btn btn-outline-secondary btn-sm" href="/clients">Клиенты</a>
+        <a class="btn btn-brand btn-sm" href="/reports">Отчёты</a>
+      </div>
+    </header>
+
+    <main class="content-shell">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }} mb-3">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
   </div>
-</nav>
-
-<div class="container-fluid px-4 py-4">
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, message in messages %}
-        <div class="alert alert-{{ category if category in ['success','warning','danger','info'] else 'info' }} mb-3">{{ message }}</div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
-  {% block content %}{% endblock %}
 </div>
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

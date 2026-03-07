@@ -2,8 +2,8 @@
 {% block content %}
 <div class="page-hero">
   <div class="hero-kicker">Новый клиент</div>
-  <div class="hero-title">Добавление клиента в систему СУГ</div>
-  <div class="hero-subtitle">Форма стала аккуратнее и легче для заполнения. Ниже можно сразу указать реквизиты, контакты и комментарии.</div>
+  <div class="hero-title">Создание карточки клиента</div>
+  <div class="hero-subtitle">Добавь основные реквизиты компании, контактные данные и комментарии. После сохранения можно сразу переходить к договору и талонам.</div>
 </div>
 
 <div class="card card-soft section-card">
@@ -11,11 +11,11 @@
     <div class="row g-3">
       <div class="col-md-8">
         <label class="form-label">Название в системе *</label>
-        <input class="form-control" name="name" placeholder="Например: ТОО МурАз" required>
+        <input class="form-control" name="name" placeholder="Название клиента для списка" required>
       </div>
       <div class="col-md-4">
         <label class="form-label">Полное название</label>
-        <input class="form-control" name="full_name" placeholder="Официальное название клиента">
+        <input class="form-control" name="full_name" placeholder="Официальное название">
       </div>
 
       <div class="col-md-3"><label class="form-label">БИН</label><input class="form-control" name="bin"></div>
@@ -30,9 +30,9 @@
       <div class="col-md-6"><label class="form-label">Телефон</label><input class="form-control" name="phone"></div>
       <div class="col-md-6"><label class="form-label">E-mail</label><input class="form-control" name="email"></div>
 
-      <div class="col-12"><label class="form-label">Комментарий</label><textarea class="form-control" name="comment" rows="4" placeholder="Дополнительная информация по клиенту"></textarea></div>
+      <div class="col-12"><label class="form-label">Комментарий</label><textarea class="form-control" name="comment" rows="4" placeholder="Примечание по клиенту"></textarea></div>
 
-      <div class="col-12 d-flex gap-2 flex-wrap mt-2">
+      <div class="col-12 d-flex gap-2 flex-wrap">
         <button class="btn btn-brand px-4">Сохранить клиента</button>
         <a class="btn btn-outline-secondary" href="/clients">Отменить</a>
       </div>

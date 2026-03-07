@@ -1,16 +1,17 @@
-<div class="client-head card card-soft mb-3">
+<div class="client-head card card-soft mb-4">
   <div class="card-body">
-    <div class="d-flex align-items-start justify-content-between gap-3">
+    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
       <div>
         <div class="d-flex align-items-center gap-2">
           <span class="status-dot"></span>
-          <div class="h5 mb-0">{{ client.name }}</div>
+          <div class="h4 mb-0">{{ client.name }}</div>
         </div>
-        <div class="text-muted small">{{ client.full_name or "" }}</div>
-        <div class="text-muted small">{{ client.comment or "" }}</div>
+        <div class="text-muted small mt-2">{{ client.full_name or "Карточка клиента" }}</div>
+        {% if client.comment %}<div class="text-muted small mt-1">{{ client.comment }}</div>{% endif %}
       </div>
-      <div>
-        <button class="btn btn-danger btn-sm" disabled>Удалить клиента</button>
+      <div class="d-flex gap-2 flex-wrap">
+        <span class="pill-stat">Договоров: {{ client.contracts|length }}</span>
+        <span class="pill-stat">Талонов: {{ client.talons|length }}</span>
       </div>
     </div>
 

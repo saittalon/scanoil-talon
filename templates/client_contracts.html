@@ -2,235 +2,216 @@
 {% block content %}
 {% include "_client_header.html" %}
 
-<div class="row g-3">
-  <div class="col-lg-3">
-    <div class="card card-soft">
-      <div class="card-body">
-        <div class="text-muted small mb-2">Список договоров:</div>
-        <div class="list-group list-group-flush">
-          {% for c in contracts %}
-            <a class="list-group-item list-group-item-action py-2 px-2 {{ 'active' if selected and selected.id==c.id else '' }}"
-               href="{{ url_for('clients.client_contracts', client_id=client.id, id=c.id) }}">
-              {{ c.number }}
-            </a>
-          {% endfor %}
-        </div>
-        <div class="mt-3">
-          <a class="btn btn-link text-decoration-none px-0" href="{{ url_for('clients.contract_new_get', client_id=client.id) }}">
-            <span class="me-1 text-success">+</span> Новый договор
-          </a>
-        </div>
+<div class="contract-layout">
+  <div class="card card-soft section-card contract-list">
+    <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+      <div>
+        <div class="section-title">Договоры клиента</div>
+        <div class="section-subtitle mb-0">Список активных и архивных договоров</div>
       </div>
+      <a class="btn btn-brand btn-sm" href="{{ url_for('clients.contract_new_get', client_id=client.id) }}">+ Новый договор</a>
+    </div>
+
+    <div class="list-group">
+      {% for c in contracts %}
+      <a class="list-group-item list-group-item-action {% if selected and selected.id == c.id %}active{% endif %}" href="{{ url_for('clients.client_contracts', client_id=client.id, id=c.id) }}">
+        <div class="d-flex justify-content-between gap-3 align-items-start">
+          <div>
+            <div class="fw-semibold">{{ c.number }}</div>
+            <div class="client-meta mt-1">{{ c.date_from }}{% if c.date_to %} — {{ c.date_to }}{% endif %}</div>
+          </div>
+          <div class="text-end">
+            <div class="fw-bold">{{ ('%.2f'|format(c.price_per_liter)) if c.price_per_liter is not none else '—' }}</div>
+            <div class="client-meta">тг/л</div>
+          </div>
+        </div>
+      </a>
+      {% else %}
+      <div class="empty-state">У клиента пока нет договоров.</div>
+      {% endfor %}
     </div>
   </div>
 
-  <div class="col-lg-9">
-    <div class="card card-soft">
-      <div class="card-body">
-        {% if not selected %}
-          <div class="text-muted">Договоров пока нет. Нажми «Новый договор».</div>
-        {% else %}
-          <div class="d-flex justify-content-between align-items-start gap-3">
+  <div class="card card-soft section-card">
+    {% if not selected %}
+      <div class="empty-state">Выбери договор слева, чтобы увидеть документы, остаток СУГ и параметры договора.</div>
+    {% else %}
+      {% set balance = (selected.balances|first) %}
+      {% set main_files = selected.files | selectattr('kind', 'equalto', 'contract') | list %}
+      {% set add_files  = selected.files | selectattr('kind', 'equalto', 'addendum') | list %}
+
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+        <div>
+          <div class="hero-kicker">Карточка договора</div>
+          <div class="hero-title" style="font-size:1.75rem;">{{ selected.number }}</div>
+          <div class="hero-subtitle">Договор действует с {{ selected.date_from }}{% if selected.date_to %} по {{ selected.date_to }}{% endif %}. Тут теперь в одном месте цена, остатки и документы.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients.contract_edit_get', client_id=client.id, contract_id=selected.id) }}">Редактировать</a>
+          <button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Добавить остатки для талонов</button>
+        </div>
+      </div>
+
+      <div class="balance-hero mb-4">
+        <div class="info-card">
+          <h6>Цена</h6>
+          <div class="info-value">{{ ('%.2f'|format(selected.price_per_liter)) if selected.price_per_liter is not none else '—' }}</div>
+          <div class="client-meta mt-2">тенге за литр</div>
+        </div>
+        <div class="info-card">
+          <h6>Остаток</h6>
+          <div class="info-value">{{ ('%.2f'|format(balance.liters_left)) if balance else '0.00' }} л</div>
+          <div class="client-meta mt-2">для печати и выдачи талонов</div>
+        </div>
+        <div class="info-card">
+          <h6>Документы</h6>
+          <div class="info-value">{{ main_files|length + add_files|length }}</div>
+          <div class="client-meta mt-2">основной договор и доп. соглашения</div>
+        </div>
+      </div>
+
+      <div class="doc-grid mb-4">
+        <div class="doc-tile">
+          <div class="d-flex align-items-center justify-content-between gap-2">
             <div>
-              <h5 class="mb-1">Договор</h5>
-              <div class="text-muted small">
-                {{ selected.number }}
-                {% if selected.date_to %}
-                  c {{ selected.date_from }} г. до {{ selected.date_to }} г.
-                {% else %}
-                  c {{ selected.date_from }} г.
-                {% endif %}
-              </div>
+              <div class="fw-semibold">📁 Основной договор</div>
+              <div class="client-meta mt-1">Загрузи основной PDF-файл договора</div>
             </div>
-            <a class="text-decoration-none" href="{{ url_for('clients.contract_edit_get', client_id=client.id, contract_id=selected.id) }}">✎ Редактировать</a>
+            <span class="pill-stat">{{ main_files|length }}</span>
           </div>
-
-          <hr>
-
-          <div class="mb-3">
-            <div class="text-muted small">Тариф</div>
-            <div class="d-flex align-items-center gap-2">
-              <div>{{ selected.tariff_name or "-" }}</div>
-              {% if selected.online %}<span class="badge text-bg-success">online</span>{% endif %}
-            </div>
-          </div>
-
-          <div class="mb-3">
-            <div class="text-muted small">Запрещённые группы АЗС</div>
-            <div>{{ selected.forbidden_groups or "Нет" }}</div>
-          </div>
-
-          <!-- ✅ ПАПКИ PDF ДОГОВОРА -->
-          <div class="mb-4">
-            <div class="d-flex justify-content-between align-items-center">
+          <form class="mt-3 d-flex flex-wrap gap-2" method="post" enctype="multipart/form-data" action="{{ url_for('contract_files.upload_contract_file', contract_id=selected.id) }}">
+            <input class="form-control" style="max-width:320px" type="file" name="file" accept="application/pdf" required>
+            <input type="hidden" name="kind" value="contract">
+            <button class="btn btn-outline-secondary" type="submit">Загрузить PDF</button>
+          </form>
+          <div class="mt-3 side-list">
+            {% for f in main_files %}
+            <div class="file-row d-flex justify-content-between align-items-center gap-3">
               <div>
-                <div class="text-muted small">Файлы договора</div>
-                <div class="small text-muted">Основной договор + доп. соглашения (PDF)</div>
+                <div class="fw-semibold">{{ f.original_name or 'contract.pdf' }}</div>
+                <div class="client-meta mt-1">{{ f.created_at.strftime('%Y-%m-%d %H:%M') if f.created_at else '' }}</div>
               </div>
-            </div>
-
-            {% set main_files = selected.files | selectattr('kind', 'equalto', 'contract') | list %}
-            {% set add_files  = selected.files | selectattr('kind', 'equalto', 'addendum') | list %}
-
-            <div class="mt-3 border rounded p-3">
-              <div class="d-flex align-items-center justify-content-between">
-                <div class="fw-semibold">📁 Договор</div>
-              </div>
-
-              <form class="mt-2 d-flex flex-wrap gap-2" method="post" enctype="multipart/form-data"
-                    action="{{ url_for('contract_files.upload_contract_file', contract_id=selected.id) }}">
-                <input class="form-control form-control-sm" style="max-width:320px" type="file" name="file" accept="application/pdf" required>
-                <input type="hidden" name="kind" value="contract">
-                <button class="btn btn-outline-primary btn-sm" type="submit">Загрузить основной договор (PDF)</button>
-              </form>
-
-              <div class="mt-3">
-                {% if main_files %}
-                  {% for f in main_files %}
-                    <div class="d-flex align-items-center justify-content-between border-top pt-2 mt-2">
-                      <div class="small">
-                        📄 <a target="_blank" class="text-decoration-none"
-                              href="{{ url_for('download_contract_file', file_id=f.id) }}">
-                              {{ f.original_name or "contract.pdf" }}
-                            </a>
-                        <div class="text-muted" style="font-size:12px;">
-                          {{ f.created_at.strftime('%Y-%m-%d %H:%M') if f.created_at else '' }}
-                        </div>
-                      </div>
-                      <form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
-                        <button class="btn btn-outline-danger btn-sm" type="submit">Удалить</button>
-                      </form>
-                    </div>
-                  {% endfor %}
-                {% else %}
-                  <div class="text-muted small mt-2">Основной договор не загружен</div>
-                {% endif %}
-              </div>
-            </div>
-
-            <div class="mt-3 border rounded p-3">
-              <div class="d-flex align-items-center justify-content-between">
-                <div class="fw-semibold">📁 Дополнительные соглашения</div>
-                <div class="text-muted small">({{ add_files|length }})</div>
-              </div>
-
-              <form class="mt-2 d-flex flex-wrap gap-2" method="post" enctype="multipart/form-data"
-                    action="{{ url_for('contract_files.upload_contract_file', contract_id=selected.id) }}">
-                <input class="form-control form-control-sm" style="max-width:320px" type="file" name="file" accept="application/pdf" required>
-                <input type="hidden" name="kind" value="addendum">
-                <button class="btn btn-outline-primary btn-sm" type="submit">Добавить допик (PDF)</button>
-              </form>
-
-              <div class="mt-3">
-                {% if add_files %}
-                  {% for f in add_files %}
-                    <div class="d-flex align-items-center justify-content-between border-top pt-2 mt-2">
-                      <div class="small">
-                        📄 <a target="_blank" class="text-decoration-none"
-                              href="{{ url_for('download_contract_file', file_id=f.id) }}">
-                              {{ f.original_name or ("addendum_" ~ f.id ~ ".pdf") }}
-                            </a>
-                        <div class="text-muted" style="font-size:12px;">
-                          {{ f.created_at.strftime('%Y-%m-%d %H:%M') if f.created_at else '' }}
-                        </div>
-                      </div>
-                      <form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
-                        <button class="btn btn-outline-danger btn-sm" type="submit">Удалить</button>
-                      </form>
-                    </div>
-                  {% endfor %}
-                {% else %}
-                  <div class="text-muted small mt-2">Допики не добавлены</div>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-          <!-- /✅ ПАПКИ PDF ДОГОВОРА -->
-
-          <div class="mb-4">
-            <div class="d-flex align-items-center gap-2">
-              <div class="text-muted small mb-0">Остатки для талонов</div>
-              <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Изменить</button>
-            </div>
-            <div class="mt-2">
-              <div class="small"><b>Товар</b> &nbsp;&nbsp; <b>Остаток, л</b></div>
-              <div class="small">ГАЗ &nbsp;&nbsp; <b>{{ "%.2f"|format(balance.liters_left) if balance else "0.00" }}</b></div>
-            </div>
-          </div>
-
-          <div class="modal fade" id="balanceModal" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog modal-lg modal-dialog-centered">
-              <div class="modal-content">
-                <div class="modal-header">
-                  <h5 class="modal-title">Остатки для талонов</h5>
-                  <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <form method="post" action="{{ url_for('clients.balance_set', client_id=client.id) }}">
-                  <div class="modal-body">
-                    <input type="hidden" name="contract_id" value="{{ selected.id }}">
-                    <div class="row g-3">
-                      <div class="col-md-6">
-                        <label class="form-label">Договор *</label>
-                        <input class="form-control" value="{{ selected.number }}" disabled>
-                      </div>
-                      <div class="col-md-3">
-                        <label class="form-label">от *</label>
-                        <input class="form-control" value="{{ selected.date_from }}" disabled>
-                      </div>
-                      <div class="col-md-3">
-                        <label class="form-label">до</label>
-                        <input class="form-control" value="{{ selected.date_to or '' }}" disabled>
-                      </div>
-
-                      <div class="col-md-6">
-                        <label class="form-label">Товар</label>
-                        <select class="form-select" disabled>
-                          <option selected>ГАЗ</option>
-                        </select>
-                      </div>
-                      <div class="col-md-6 d-flex align-items-end">
-                        <div class="form-check">
-                          <input class="form-check-input" type="checkbox" name="balance_control" id="bc" {% if not balance or balance.balance_control %}checked{% endif %}>
-                          <label class="form-check-label" for="bc">Контролировать баланс</label>
-                        </div>
-                      </div>
-
-                      <div class="col-12">
-                        <div class="border rounded p-3">
-                          <div class="mt-2 d-flex flex-wrap gap-2">
-                            {% for add in [50,100,250,500,1000,5000,10000] %}
-                              <button type="button" class="btn btn-outline-primary btn-sm" onclick="addLiters({{ add }})">+{{ add }} л</button>
-                            {% endfor %}
-                            <div class="d-flex align-items-center gap-2 ms-auto">
-                              <input class="form-control form-control-sm" style="width:120px" id="litersInput" name="liters_left" value="{{ balance.liters_left if balance else 0 }}">
-                              <span>л</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                  <div class="modal-footer">
-                    <button class="btn btn-success">Сохранить</button>
-                    <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отменить</button>
-                  </div>
+              <div class="d-flex gap-2">
+                <a target="_blank" class="btn btn-outline-secondary btn-sm" href="{{ url_for('download_contract_file', file_id=f.id) }}">Открыть</a>
+                <form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
+                  <button class="btn btn-outline-danger btn-sm" type="submit">Удалить</button>
                 </form>
               </div>
             </div>
+            {% else %}
+            <div class="client-meta mt-3">Основной договор ещё не загружен.</div>
+            {% endfor %}
           </div>
+        </div>
 
-          <script>
-            function addLiters(x){
-              const inp = document.getElementById('litersInput');
-              const cur = parseFloat((inp.value || "0").toString().replace(",", ".")) || 0;
-              inp.value = (cur + x).toString();
-            }
-          </script>
-
-        {% endif %}
+        <div class="doc-tile">
+          <div class="d-flex align-items-center justify-content-between gap-2">
+            <div>
+              <div class="fw-semibold">📁 Дополнительные соглашения</div>
+              <div class="client-meta mt-1">Все допики лежат отдельно и не мешаются с основным договором</div>
+            </div>
+            <span class="pill-stat">{{ add_files|length }}</span>
+          </div>
+          <form class="mt-3 d-flex flex-wrap gap-2" method="post" enctype="multipart/form-data" action="{{ url_for('contract_files.upload_contract_file', contract_id=selected.id) }}">
+            <input class="form-control" style="max-width:320px" type="file" name="file" accept="application/pdf" required>
+            <input type="hidden" name="kind" value="addendum">
+            <button class="btn btn-outline-secondary" type="submit">Добавить доп. соглашение</button>
+          </form>
+          <div class="mt-3 side-list">
+            {% for f in add_files %}
+            <div class="file-row d-flex justify-content-between align-items-center gap-3">
+              <div>
+                <div class="fw-semibold">{{ f.original_name or ('addendum_' ~ f.id ~ '.pdf') }}</div>
+                <div class="client-meta mt-1">{{ f.created_at.strftime('%Y-%m-%d %H:%M') if f.created_at else '' }}</div>
+              </div>
+              <div class="d-flex gap-2">
+                <a target="_blank" class="btn btn-outline-secondary btn-sm" href="{{ url_for('download_contract_file', file_id=f.id) }}">Открыть</a>
+                <form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
+                  <button class="btn btn-outline-danger btn-sm" type="submit">Удалить</button>
+                </form>
+              </div>
+            </div>
+            {% else %}
+            <div class="client-meta mt-3">Дополнительные соглашения пока не добавлены.</div>
+            {% endfor %}
+          </div>
+        </div>
       </div>
-    </div>
+
+      <div class="info-card">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+          <div>
+            <h6 class="mb-2">Остатки для талонов</h6>
+            <div class="client-meta">Контроль литров по выбранному договору</div>
+          </div>
+          <button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Изменить остаток</button>
+        </div>
+        <div class="fw-bold">{{ ('%.2f'|format(balance.liters_left)) if balance else '0.00' }} л</div>
+      </div>
+
+      <div class="modal fade" id="balanceModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Остатки для талонов</h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{{ url_for('clients.balance_set', client_id=client.id) }}">
+              <div class="modal-body">
+                <input type="hidden" name="contract_id" value="{{ selected.id }}">
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Договор</label>
+                    <input class="form-control" value="{{ selected.number }}" disabled>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Дата от</label>
+                    <input class="form-control" value="{{ selected.date_from }}" disabled>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Дата до</label>
+                    <input class="form-control" value="{{ selected.date_to or '' }}" disabled>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Товар</label>
+                    <input class="form-control" name="product_name" value="ГАЗ" readonly>
+                  </div>
+                  <div class="col-md-6 d-flex align-items-end">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="balance_control" id="bc" {% if not balance or balance.balance_control %}checked{% endif %}>
+                      <label class="form-check-label" for="bc">Контролировать баланс</label>
+                    </div>
+                  </div>
+                  <div class="col-12">
+                    <div class="info-card">
+                      <div class="client-meta mb-2">Быстрые кнопки пополнения</div>
+                      <div class="liter-badges mb-3">
+                        {% for add in [50,100,250,500,1000,5000,10000] %}
+                          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addLiters({{ add }})">+{{ add }} л</button>
+                        {% endfor %}
+                      </div>
+                      <label class="form-label">Текущий остаток, л</label>
+                      <input class="form-control" id="litersInput" name="liters_left" value="{{ balance.liters_left if balance else 0 }}">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn btn-brand">Сохранить</button>
+                <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отменить</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      <script>
+        function addLiters(x){
+          const inp = document.getElementById('litersInput');
+          const cur = parseFloat((inp.value || "0").toString().replace(",", ".")) || 0;
+          inp.value = (cur + x).toString();
+        }
+      </script>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

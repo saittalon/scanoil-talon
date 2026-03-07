@@ -1,28 +1,54 @@
 {% extends "base.html" %}
 {% block content %}
 {% include "_client_header.html" %}
+{% set active_count = talons|selectattr('state', 'equalto', 'active')|list|length %}
+{% set used_count = talons|selectattr('state', 'equalto', 'used')|list|length %}
+{% set total_liters = talons|sum(attribute='liters') %}
 
-<div class="card card-soft">
-  <div class="card-body">
-    <h5 class="mb-3">Отчёт по талонам клиента</h5>
+<div class="page-hero">
+  <div class="hero-kicker">Отчёт по клиенту</div>
+  <div class="hero-title">Талоны, объём СУГ и статус использования</div>
+  <div class="hero-subtitle">Теперь отчёт по клиенту выглядит как мини-dashboard: сверху ключевые цифры, ниже — график по статусам и подробная таблица.</div>
+</div>
 
+<div class="report-stat-grid mb-4">
+  <div class="metric-card"><div class="metric-label">Всего талонов</div><div class="metric-value">{{ talons|length }}</div><div class="metric-foot">В выборке по клиенту</div></div>
+  <div class="metric-card"><div class="metric-label">Активные</div><div class="metric-value">{{ active_count }}</div><div class="metric-foot">Можно использовать</div></div>
+  <div class="metric-card"><div class="metric-label">Литры</div><div class="metric-value">{{ '%.0f'|format(total_liters) }} л</div><div class="metric-foot">Общий объём талонов</div></div>
+</div>
+
+<div class="report-grid mb-4">
+  <div class="card card-soft section-card">
+    <div class="section-title">Фильтр периода</div>
+    <div class="section-subtitle">Можно быстро выгрузить Excel по нужному диапазону.</div>
     <form class="row g-3" method="get" action="{{ url_for('clients.client_reports', client_id=client.id) }}">
-      <div class="col-md-3">
+      <div class="col-md-4">
         <label class="form-label">Период действия (от)</label>
         <input class="form-control" type="date" name="date_from" value="{{ date_from or '' }}">
       </div>
-      <div class="col-md-3">
+      <div class="col-md-4">
         <label class="form-label">Период действия (до)</label>
         <input class="form-control" type="date" name="date_to" value="{{ date_to or '' }}">
       </div>
-      <div class="col-md-6 d-flex align-items-end gap-2">
-        <button class="btn btn-outline-dark" type="submit">Показать</button>
-        <a class="btn btn-success" href="{{ url_for('reports.client_report_excel', client_id=client.id) }}?date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">Скачать Excel</a>
+      <div class="col-md-4 d-flex align-items-end gap-2 flex-wrap">
+        <button class="btn btn-outline-secondary" type="submit">Показать</button>
+        <a class="btn btn-brand" href="{{ url_for('reports.client_report_excel', client_id=client.id) }}?date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">Скачать Excel</a>
       </div>
     </form>
+  </div>
+  <div class="card card-soft section-card chart-card">
+    <div class="section-title">Статусы талонов</div>
+    <div class="section-subtitle">Сразу видно, сколько талонов уже использовано, а сколько остаётся активными.</div>
+    <div class="chart-wrap"><canvas id="clientStatusChart"></canvas></div>
+  </div>
+</div>
 
-    <div class="table-responsive mt-3">
-      <table class="table table-sm align-middle">
+<div class="card card-soft section-card">
+  <div class="section-title">Таблица талонов</div>
+  <div class="section-subtitle">Подробный журнал по талонам клиента.</div>
+  <div class="table-shell">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
         <thead>
           <tr>
             <th>№</th><th>Клиент</th><th>Держатель</th><th>Товар</th><th>Номинал</th><th>С</th><th>По</th><th>Талон</th><th>Статус</th>
@@ -41,11 +67,29 @@
             <td>{{ t.code }}</td>
             <td>{{ t.state }}</td>
           </tr>
+          {% else %}
+          <tr><td colspan="9" class="empty-state">Нет талонов за выбранный период.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-
   </div>
 </div>
+
+<script>
+const statusCtx = document.getElementById('clientStatusChart');
+if (statusCtx) {
+  new Chart(statusCtx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Активные', 'Использованные', 'Другие'],
+      datasets: [{ data: [{{ active_count }}, {{ used_count }}, {{ talons|length - active_count - used_count }}] }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#dce8ff' } } }
+    }
+  });
+}
+</script>
 {% endblock %}

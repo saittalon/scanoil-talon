@@ -1,56 +1,161 @@
 {% extends "base.html" %}
-
 {% block content %}
-<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-  <div>
-    <a class="btn btn-success" href="{{ url_for('clients.new_client') }}">
-      + Новый клиент
-    </a>
-
-    {% if is_admin %}
-      <button class="btn btn-outline-danger ms-2" data-bs-toggle="modal" data-bs-target="#deleteClientModal">
-        Удалить клиента
-      </button>
+{% set total_clients = clients|length %}
+{% set total_talons = namespace(v=0) %}
+{% set used_talons = namespace(v=0) %}
+{% set active_talons = namespace(v=0) %}
+{% set liters_left = namespace(v=0) %}
+{% for c in clients %}
+  {% set total_talons.v = total_talons.v + (c.talons|length) %}
+  {% for t in c.talons %}
+    {% if t.state == 'used' %}
+      {% set used_talons.v = used_talons.v + 1 %}
+    {% else %}
+      {% set active_talons.v = active_talons.v + 1 %}
     {% endif %}
+  {% endfor %}
+  {% for b in c.balances %}
+    {% set liters_left.v = liters_left.v + (b.liters_left or 0) %}
+  {% endfor %}
+{% endfor %}
+
+<div class="page-hero">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+    <div>
+      <div class="hero-kicker">Панель управления</div>
+      <div class="hero-title">Клиенты, талоны и аналитика по сжиженному газу в одном окне</div>
+      <div class="hero-subtitle">Главная страница теперь работает как dashboard: сверху ключевые цифры, ниже — график активности и остатки по клиентам. Это намного удобнее старого ScanOil-стиля.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-brand" href="{{ url_for('clients.new_client') }}">+ Новый клиент</a>
+      <a class="btn btn-outline-secondary" href="/reports">Открыть аналитику</a>
+      {% if is_admin %}
+      <button class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteClientModal">Удалить клиента</button>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="metrics-grid mb-4">
+  <div class="metric-card">
+    <div class="metric-label">Клиенты</div>
+    <div class="metric-value">{{ total_clients }}</div>
+    <div class="metric-foot">Всего карточек в системе</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Талоны в работе</div>
+    <div class="metric-value">{{ active_talons.v }}</div>
+    <div class="metric-foot">Активные и неиспользованные</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Использованные талоны</div>
+    <div class="metric-value">{{ used_talons.v }}</div>
+    <div class="metric-foot">Показывает фактическую активность</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Остаток СУГ</div>
+    <div class="metric-value">{{ '%.0f'|format(liters_left.v) }} л</div>
+    <div class="metric-foot">Суммарно по всем клиентам</div>
+  </div>
+</div>
+
+<div class="grid-2 mb-4">
+  <div class="card card-soft section-card chart-card">
+    <div class="section-title">График по клиентам</div>
+    <div class="section-subtitle">Сравнение общего количества талонов и оставшихся литров по каждому клиенту.</div>
+    <div class="chart-wrap"><canvas id="clientsOverviewChart"></canvas></div>
   </div>
 
-  <div class="d-flex flex-column align-items-end small">
-    <a class="text-decoration-none" href="/reports/all?preset=jan">По всем клиентам за Январь</a>
-    <a class="text-decoration-none" href="/reports/all?preset=feb">По всем клиентам за Февраль</a>
+  <div class="card card-soft section-card">
+    <div class="section-title">Быстрые ссылки по отчётам</div>
+    <div class="section-subtitle">Переходы к общей аналитике и месячным выборкам.</div>
+    <div class="side-list">
+      <a class="side-item text-decoration-none" href="/reports/all?preset=jan"><b>Январь</b><div class="client-meta mt-1">Отчёт по всем клиентам за Январь</div></a>
+      <a class="side-item text-decoration-none" href="/reports/all?preset=feb"><b>Февраль</b><div class="client-meta mt-1">Отчёт по всем клиентам за Февраль</div></a>
+      <a class="side-item text-decoration-none" href="/reports"><b>Полная аналитика</b><div class="client-meta mt-1">Сводка продаж, остатки и отчёты по клиенту</div></a>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card card-soft section-card">
+    <div class="section-title">Клиенты</div>
+    <div class="section-subtitle">Каждая карточка теперь показывает быстрые показатели и ссылки, а не просто сухую таблицу.</div>
+    <div class="client-list">
+      {% for c in clients %}
+      {% set client_liters = namespace(v=0) %}
+      {% set client_used = namespace(v=0) %}
+      {% for b in c.balances %}{% set client_liters.v = client_liters.v + (b.liters_left or 0) %}{% endfor %}
+      {% for t in c.talons %}{% if t.state == 'used' %}{% set client_used.v = client_used.v + (t.liters or 0) %}{% endif %}{% endfor %}
+      <div class="client-item">
+        <div class="client-item-main">
+          <div class="client-name">{{ c.name }}</div>
+          <div class="client-meta">ID: {{ c.id }}{% if c.full_name %} • {{ c.full_name }}{% endif %}</div>
+          <div class="client-quickstats">
+            <span class="pill-stat">Талоны: {{ c.talons|length }}</span>
+            <span class="pill-stat">Остаток: {{ '%.0f'|format(client_liters.v) }} л</span>
+            <span class="pill-stat">Использовано: {{ '%.0f'|format(client_used.v) }} л</span>
+            <span class="pill-stat">Договоров: {{ c.contracts|length }}</span>
+          </div>
+        </div>
+        <div class="quick-links">
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients.client_talons', client_id=c.id) }}">Талоны</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients.client_profile', client_id=c.id) }}">Профиль</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients.client_contracts', client_id=c.id) }}">Договор</a>
+          <a class="btn btn-brand btn-sm" href="{{ url_for('clients.client_reports', client_id=c.id) }}">Отчёты</a>
+        </div>
+      </div>
+      {% else %}
+      <div class="empty-state">Пока нет клиентов. Добавь первую карточку, и dashboard начнёт заполняться данными.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card card-soft section-card">
+    <div class="section-title">Остатки по клиентам</div>
+    <div class="section-subtitle">Тут сразу видно, у кого есть запас сжиженного газа, а у кого он подходит к концу.</div>
+    <div class="side-list">
+      {% for c in clients %}
+      {% set client_liters = namespace(v=0) %}
+      {% for b in c.balances %}{% set client_liters.v = client_liters.v + (b.liters_left or 0) %}{% endfor %}
+      <div class="side-item d-flex justify-content-between align-items-center gap-3">
+        <div>
+          <b>{{ c.name }}</b>
+          <div class="client-meta mt-1">{{ c.contracts|length }} договор(ов) • {{ c.talons|length }} талонов</div>
+        </div>
+        <div class="text-end">
+          <div class="fw-bold">{{ '%.0f'|format(client_liters.v) }} л</div>
+          <div class="client-meta">остаток</div>
+        </div>
+      </div>
+      {% else %}
+      <div class="empty-state">Когда появятся данные по балансам, здесь отобразится сводка остатков.</div>
+      {% endfor %}
+    </div>
   </div>
 </div>
 
 {% if is_admin %}
-<!-- Modal: delete client -->
 <div class="modal fade" id="deleteClientModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Удалить клиента</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-
       <form method="post" action="{{ url_for('clients.delete_client') }}">
         <div class="modal-body">
-          <div class="alert alert-warning mb-3">
-            Удаление необратимо: будут удалены договоры, остатки и талоны выбранного клиента.
-          </div>
-
+          <div class="alert alert-warning mb-3">Удаление необратимо: будут удалены договоры, остатки и талоны выбранного клиента.</div>
           <label class="form-label">Выбери клиента *</label>
           <select class="form-select" name="client_id" required>
             <option value="" selected disabled>— Выбери —</option>
             {% for c in clients %}
-              <option value="{{ c.id }}">{{ c.name }} (ID: {{ c.id }})</option>
+            <option value="{{ c.id }}">{{ c.name }} (ID: {{ c.id }})</option>
             {% endfor %}
           </select>
-
-          {% if clients|length == 0 %}
-            <div class="text-muted small mt-2">Клиентов нет — удалять нечего.</div>
-          {% endif %}
         </div>
-
         <div class="modal-footer">
-          <button class="btn btn-danger" {% if clients|length == 0 %}disabled{% endif %}>Удалить</button>
+          <button class="btn btn-outline-danger" {% if clients|length == 0 %}disabled{% endif %}>Удалить</button>
           <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отмена</button>
         </div>
       </form>
@@ -59,45 +164,30 @@
 </div>
 {% endif %}
 
-<div class="card card-soft">
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
-        <thead class="table-light">
-          <tr>
-            <th style="width: 45%;">Клиент</th>
-            <th style="width: 20%;">Талоны</th>
-            <th style="width: 35%;">Быстрые ссылки</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for c in clients %}
-          <tr>
-            <td>
-              <div class="fw-semibold">{{ c.name }}</div>
-              <div class="text-muted small">ID: {{ c.id }}</div>
-            </td>
-            <td>
-              <a class="text-decoration-none" href="{{ url_for('clients.client_talons', client_id=c.id) }}">
-                {{ c.talons|length }}
-              </a>
-            </td>
-            <td class="small">
-              <a class="text-decoration-none me-3" href="{{ url_for('clients.client_talons', client_id=c.id) }}">Талоны</a>
-              <a class="text-decoration-none me-3" href="{{ url_for('clients.client_profile', client_id=c.id) }}">Профиль</a>
-              <a class="text-decoration-none me-3" href="{{ url_for('clients.client_contracts', client_id=c.id) }}">Договор</a>
-              <a class="text-decoration-none" href="{{ url_for('clients.client_reports', client_id=c.id) }}">Отчёты</a>
-            </td>
-          </tr>
-          {% endfor %}
-          {% if clients|length == 0 %}
-          <tr>
-            <td colspan="3" class="text-muted p-4">Пока нет клиентов.</td>
-          </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
+<script>
+  const clientLabels = [{% for c in clients %}"{{ c.name|replace('"', '\\"') }}"{{ "," if not loop.last }}{% endfor %}];
+  const clientTalons = [{% for c in clients %}{{ c.talons|length }}{{ "," if not loop.last }}{% endfor %}];
+  const clientBalances = [{% for c in clients %}{% set liters = namespace(v=0) %}{% for b in c.balances %}{% set liters.v = liters.v + (b.liters_left or 0) %}{% endfor %}{{ liters.v }}{{ "," if not loop.last }}{% endfor %}];
+  const ctx = document.getElementById('clientsOverviewChart');
+  if (ctx) {
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: clientLabels,
+        datasets: [
+          { label: 'Талоны', data: clientTalons, borderWidth: 0, borderRadius: 8 },
+          { label: 'Остаток СУГ, л', data: clientBalances, type: 'line', tension: 0.35 }
+        ]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#dce8ff' } } },
+        scales: {
+          x: { ticks: { color: '#aebfe3' }, grid: { color: 'rgba(255,255,255,.05)' } },
+          y: { ticks: { color: '#aebfe3' }, grid: { color: 'rgba(255,255,255,.05)' } }
+        }
+      }
+    });
+  }
+</script>
 {% endblock %}

@@ -103,12 +103,18 @@ def _make_scan_url(flask_app, tg_user_id: int) -> str | None:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
+
     with app.app_context():
         sess = _get_session(update.effective_user.id)
-    if sess:
+        if sess:
+            agzs_name = sess.agzs.name if sess.agzs else "АГЗС"
+        else:
+            agzs_name = None
+
+    if agzs_name:
         scan_url = _make_scan_url(app, update.effective_user.id)
         await update.message.reply_text(
-            f"✅ Вы вошли: {sess.agzs.name}",
+            f"✅ Вы вошли: {agzs_name}",
             reply_markup=_main_keyboard(scan_url)
         )
     else:
@@ -267,17 +273,23 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
     tg_user_id = update.effective_user.id
+
     with app.app_context():
         sess = _get_session(tg_user_id)
+        if not sess:
+            await update.message.reply_text(
+                "Сначала войдите",
+                reply_markup=_auth_keyboard()
+            )
+            return
 
-    if not sess:
-        await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
-        return
+        agzs_name = sess.agzs.name if sess.agzs else "АГЗС"
 
     _set_shift_open(context, tg_user_id, True)
     scan_url = _make_scan_url(app, tg_user_id)
+
     await update.message.reply_text(
-        f"🟢 Смена открыта: {sess.agzs.name}\nВыберите действие в меню.",
+        f"🟢 Смена открыта: {agzs_name}\nВыберите действие в меню.",
         reply_markup=_main_keyboard(scan_url)
     )
 

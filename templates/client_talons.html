@@ -25,7 +25,7 @@
       <table class="table table-sm align-middle">
         <thead>
           <tr>
-            <th>№</th><th>Код</th><th>Услуга</th><th>Номинал</th><th>Период</th><th>Статус</th><th></th>
+            <th>№</th><th>Код</th><th>QR</th><th>Услуга</th><th>Номинал</th><th>Период</th><th>Доп. соглашение</th><th>Статус</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -33,31 +33,26 @@
           <tr>
             <td>{{ t.serial_number }}</td>
             <td>{{ t.code }}</td>
-            <td>
-              <a  href="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}">
-                <img alt="qr" src="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}" style="height:34px; width:34px;">
-              </a>
-            </td>
+            <td><a href="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}"><img alt="qr" src="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}" style="height:34px; width:34px;"></a></td>
             <td>{{ t.product_name }}</td>
             <td>{{ t.liters }} л</td>
             <td>{{ t.valid_from }} – {{ t.valid_to }}</td>
+            <td>{{ t.addendum_file.original_name if t.addendum_file else "—" }}</td>
             <td>
-              {% if t.state == 'used' %}
+              {% if t.effective_state == 'used' %}
                 <span class="badge text-bg-secondary">Использован</span>
-              {% elif t.state == 'blocked' %}
+              {% elif t.effective_state == 'blocked' %}
                 <span class="badge text-bg-danger">Заблокирован</span>
+              {% elif t.effective_state == 'expired' %}
+                <span class="badge text-bg-warning">Срок действия истек</span>
               {% else %}
                 <span class="badge text-bg-success">В работе</span>
               {% endif %}
             </td>
             <td class="text-end">
-              {% if t.state == 'active' %}
+              {% if t.effective_state == 'active' %}
                 <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
-                  <button class="btn btn-outline-primary btn-sm">Использовать</button>
-                </form>
-              {% else %}
-                <span class="text-muted small">—</span>
-              {% endif %}
+                  <button class="btn btn-outline-primary btn-sm">Использовать</button></form>{% elif t.effective_state == "expired" %}<form method="post" action="{{ url_for('clients.talon_extend', talon_id=t.id) }}" style="display:inline" class="d-flex gap-2 align-items-center"><input type="date" class="form-control form-control-sm" name="new_valid_to" required><button class="btn btn-outline-warning btn-sm">Продлить</button></form>{% else %}<span class="text-muted small">—</span>{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -125,8 +120,7 @@
             </div>
           </div>
           
-          <input type="hidden" name="product_name" value="ГАЗ">
-          <div id="balanceInfo" class="alert alert-light border mt-3 mb-0" style="display:none"></div>
+          <div class="row g-3 mt-1"><div class="col-md-12"><label class="form-label">Доп. соглашение</label><select class="form-select" id="addendumSelect" name="addendum_file_id"><option value="">— без доп. соглашения —</option></select><div class="form-text">Каждый объем можно привязать к подтвержденному доп. соглашению.</div></div></div><input type="hidden" name="product_name" value="ГАЗ"><div id="balanceInfo" class="alert alert-light border mt-3 mb-0" style="display:none"></div>
         </div>
 
         <div class="modal-footer">
@@ -137,16 +131,26 @@
 
       <script>
         const BALANCES = {{ balances_json|safe }};
+        const ADDENDUMS = {{ addendums_json|safe }};
 
         function setLiters(x){
           document.getElementById('litersInput').value = x.toString();
           updateBalanceHint();
+        updateAddendums();
         }
 
         function numVal(id){
           const v = (document.getElementById(id).value || "0").toString().replace(",", ".");
           const n = parseFloat(v);
           return isNaN(n) ? 0 : n;
+        }
+
+        function updateAddendums(){
+          const contractId = (document.getElementById("contractSelect").value || "").toString();
+          const sel = document.getElementById("addendumSelect");
+          if(!sel) return;
+          sel.innerHTML = `<option value="">— без доп. соглашения —</option>`;
+          (ADDENDUMS[contractId] || []).forEach(x => { if(x.approved){ const o=document.createElement("option"); o.value=x.id; o.textContent=x.title; sel.appendChild(o);} });
         }
 
         function updateBalanceHint(){
@@ -190,10 +194,12 @@
         const contractEl = document.getElementById('contractSelect');
         const litersEl = document.getElementById('litersInput');
         const qtyEl = document.getElementById('qtyInput');
-        if(contractEl) contractEl.addEventListener('change', updateBalanceHint);
+        if(contractEl) contractEl.addEventListener('change', function(){ updateBalanceHint();
+        updateAddendums(); updateAddendums(); });
         if(litersEl) litersEl.addEventListener('input', updateBalanceHint);
         if(qtyEl) qtyEl.addEventListener('input', updateBalanceHint);
         updateBalanceHint();
+        updateAddendums();
       </script>
     </div>
   </div>

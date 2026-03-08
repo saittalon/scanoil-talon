@@ -28,12 +28,7 @@
           <label class="form-label">до</label>
           <input class="form-control" type="date" name="date_to" value="{{ contract.date_to or '' }}">
         </div>
-
         <div class="col-md-6">
-          <label class="form-label">Тариф</label>
-          <input class="form-control" name="tariff_name" value="{{ contract.tariff_name or '' }}" placeholder="[570] Газ 60тг">
-        </div>
-        <div class="col-md-2">
           <label class="form-label">Цена (тг/л)</label>
           <input class="form-control" name="price_per_liter" value="{{ '%.2f'|format(contract.price_per_liter) if contract.price_per_liter is not none else '' }}" placeholder="102.00">
         </div>

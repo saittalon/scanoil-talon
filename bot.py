@@ -172,8 +172,16 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
         talon = Talon.query.filter_by(code=code).first()
-        if not talon or talon.state == "used":
-            await update.message.reply_text("❌ Талон недоступен")
+        if not talon:
+            await update.message.reply_text("❌ Талон не найден")
+            return ConversationHandler.END
+        if talon.valid_to and talon.valid_to < datetime.utcnow().date():
+            talon.state = "expired"
+            db.session.commit()
+            await update.message.reply_text("❌ Срок действия талона истек")
+            return ConversationHandler.END
+        if talon.state == "used":
+            await update.message.reply_text("❌ Талон уже использован")
             return ConversationHandler.END
 
         talon.state = "used"

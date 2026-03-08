@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from sqlalchemy import inspect, text
 
 from flask import (
     Flask, redirect, url_for, request, jsonify, render_template,
@@ -19,6 +20,8 @@ from models import (
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
+from helpers import require_roles
+from mail_utils import send_daily_report
 
 # ✅ Файлы договоров (PDF) — блюпринт
 from contract_files import contract_files_bp
@@ -76,6 +79,14 @@ def create_app():
 
         return redirect(signed_url)
 
+
+    @app.post("/admin/send-daily-report")
+    @login_required
+    @require_roles("director", "deputy_director")
+    def admin_send_daily_report():
+        ok = send_daily_report()
+        return jsonify({"ok": bool(ok)})
+
     # ---------------- Telegram WebApp (QR scanner) ----------------
     @app.get("/tg/scan")
     def tg_scan():
@@ -106,6 +117,11 @@ def create_app():
         talon = Talon.query.filter_by(code=code).first()
         if talon is None:
             return jsonify({"ok": False, "error": "talon_not_found"}), 404
+
+        if talon.valid_to and talon.valid_to < datetime.utcnow().date():
+            talon.state = "expired"
+            db.session.commit()
+            return jsonify({"ok": False, "error": "expired"}), 409
 
         # already used?
         if getattr(talon, "state", None) == "used":
@@ -156,16 +172,29 @@ def create_app():
 
         with app.app_context():
             db.create_all()
+            ensure_schema()
 
             if not seed:
                 return
 
-            admin = User.query.filter_by(username="admin").first()
+            admin = User.query.filter_by(username="director").first()
             if admin is None:
-                admin = User(username="admin", role="admin")
-                admin.set_password(os.getenv("ADMIN_PASSWORD", "admin123"))
+                admin = User(username="director", role="director")
+                admin.set_password(os.getenv("ADMIN_PASSWORD", "director123"))
                 db.session.add(admin)
                 db.session.commit()
+
+            deputy = User.query.filter_by(username="zamdirector").first()
+            if deputy is None:
+                deputy = User(username="zamdirector", role="deputy_director")
+                deputy.set_password(os.getenv("DEPUTY_PASSWORD", "zamdirector123"))
+                db.session.add(deputy)
+            executor = User.query.filter_by(username="executor").first()
+            if executor is None:
+                executor = User(username="executor", role="executor")
+                executor.set_password(os.getenv("EXECUTOR_PASSWORD", "executor123"))
+                db.session.add(executor)
+            db.session.commit()
 
             c = Client.query.first()
             if c is None:
@@ -247,6 +276,26 @@ def create_app():
                     db.session.add(tln)
 
                 db.session.commit()
+
+
+    def ensure_schema():
+        insp = inspect(db.engine)
+
+        def add_column(table, column_sql, column_name):
+            cols = {c['name'] for c in insp.get_columns(table)}
+            if column_name not in cols:
+                try:
+                    db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {column_sql}"))
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+
+        add_column('user', 'role VARCHAR(30)', 'role')
+        add_column('contract_files', "approval_status VARCHAR(20) DEFAULT 'approved'", 'approval_status')
+        add_column('contract_files', 'uploaded_by_user_id INTEGER', 'uploaded_by_user_id')
+        add_column('contract_files', 'approved_by_user_id INTEGER', 'approved_by_user_id')
+        add_column('contract_files', 'approved_at DATETIME', 'approved_at')
+        add_column('talon', 'addendum_file_id INTEGER', 'addendum_file_id')
 
     init_db(seed=False)
 

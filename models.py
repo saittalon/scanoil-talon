@@ -1,7 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
+from datetime import datetime, date
 
 db = SQLAlchemy()
 
@@ -10,7 +10,7 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(20), default="operator")  # admin / operator
+    role = db.Column(db.String(30), default="executor")  # director / deputy_director / executor
 
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
@@ -91,6 +91,12 @@ class ContractFile(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     bucket = db.Column(db.String(100), nullable=False, default="contracts")
     storage_key = db.Column(db.String(500), nullable=True)
+    approval_status = db.Column(db.String(20), nullable=False, default="approved")  # pending/approved/rejected
+    uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    approved_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    uploaded_by = db.relationship("User", foreign_keys=[uploaded_by_user_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
 
 
 class Balance(db.Model):
@@ -126,8 +132,10 @@ class Talon(db.Model):
 
     valid_from = db.Column(db.Date, nullable=False)
     valid_to = db.Column(db.Date, nullable=False)
+    addendum_file_id = db.Column(db.Integer, db.ForeignKey("contract_files.id"), nullable=True)
+    addendum_file = db.relationship("ContractFile", foreign_keys=[addendum_file_id])
 
-    state = db.Column(db.String(20), default="active")  # active/blocked/used
+    state = db.Column(db.String(20), default="active")  # active/blocked/used/expired
     used_at = db.Column(db.DateTime, nullable=True)
     used_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
     used_by = db.relationship("User", foreign_keys=[used_by_user_id])
@@ -137,6 +145,22 @@ class Talon(db.Model):
     used_telegram_user_id = db.Column(db.String(50), nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def effective_state(self):
+        if self.state == "used":
+            return "used"
+        if self.state == "blocked":
+            return "blocked"
+        if self.valid_to and self.valid_to < date.today():
+            return "expired"
+        return self.state or "active"
+
+    @property
+    def can_be_used(self):
+        return self.effective_state == "active" and (self.valid_from is None or self.valid_from <= date.today())
+
+
 
 
 class AGZS(db.Model):

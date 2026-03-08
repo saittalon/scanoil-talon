@@ -1,7 +1,7 @@
 import os
 import json
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from io import BytesIO
 
 import qrcode
@@ -14,13 +14,22 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from models import db, Client, Contract, Balance, Talon
+from models import db, Client, Contract, Balance, Talon, ContractFile
+from helpers import has_role, require_roles, talon_status
+from mail_utils import notify_event
 
 clients_bp = Blueprint("clients", __name__)
 
 
 def is_admin():
-    return current_user.is_authenticated and current_user.role == "admin"
+    return has_role("director", "deputy_director")
+
+def can_edit_contracts():
+    return has_role("director", "deputy_director", "executor")
+
+def contract_is_approved(contract):
+    main_ok = any(f.kind == "contract" and f.approval_status == "approved" for f in contract.files)
+    return main_ok
 
 
 def _client_tabs(client: Client):
@@ -47,6 +56,8 @@ def balance_set(client_id):
 
     contract_id_raw = (request.form.get("contract_id") or "").strip()
     contract_id = int(contract_id_raw) if contract_id_raw.isdigit() else None
+    addendum_file_id_raw = (request.form.get("addendum_file_id") or "").strip()
+    addendum_file_id = int(addendum_file_id_raw) if addendum_file_id_raw.isdigit() else None
     if contract_id is None:
         flash("Не выбран договор.", "danger")
         return redirect(url_for("clients.client_contracts", client_id=client.id))
@@ -61,6 +72,21 @@ def balance_set(client_id):
     balance_control = bool(request.form.get("balance_control"))
 
     product_name = (request.form.get("product_name") or "ГАЗ").strip() or "ГАЗ"
+    if contract_id is None:
+        flash("Выберите договор.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+    contract = Contract.query.filter_by(client_id=client.id, id=contract_id).first()
+    if not contract:
+        flash("Договор не найден.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+    if not contract_is_approved(contract):
+        flash("Основной договор не подтвержден директором/замдиректора.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+    if addendum_file_id:
+        addendum = ContractFile.query.filter_by(id=addendum_file_id, contract_id=contract.id, kind="addendum").first()
+        if not addendum or addendum.approval_status != "approved":
+            flash("Выбранное доп. соглашение не подтверждено.", "danger")
+            return redirect(url_for("clients.client_talons", client_id=client.id))
 
     bal = Balance.query.filter_by(
         client_id=client.id,
@@ -84,6 +110,7 @@ def balance_set(client_id):
         bal.updated_at = datetime.utcnow()
 
     db.session.commit()
+    notify_event("Обновлен остаток", f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}")
     flash("Остаток обновлён.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
@@ -93,7 +120,7 @@ def balance_set(client_id):
 @login_required
 def list_clients():
     clients = Client.query.order_by(Client.id.desc()).all()
-    return render_template("clients.html", clients=clients, is_admin=is_admin())
+    return render_template("clients.html", clients=clients, is_admin=is_admin(), current_role=current_user.role)
 
 
 # ---------------- Новый клиент (ВАЖНО: endpoint=new_client) ----------------
@@ -134,6 +161,7 @@ def client_new_post():
     )
     db.session.add(c)
     db.session.commit()
+    notify_event("Создан новый клиент", f"Пользователь {current_user.username} создал клиента: {c.name}")
     flash("Клиент создан", "success")
     return redirect(url_for("clients.list_clients"))
 
@@ -181,6 +209,7 @@ def client_profile(client_id):
 def client_contracts(client_id):
     client = Client.query.get_or_404(client_id)
     contracts = Contract.query.filter_by(client_id=client.id).order_by(Contract.id.desc()).all()
+    addendums_map = {str(c.id): [{"id": f.id, "title": (f.original_name or f.title or f"Доп. соглашение #{f.id}"), "approved": f.approval_status == "approved"} for f in c.files if f.kind == "addendum"] for c in contracts}
 
     selected = None
     cid = request.args.get("id")
@@ -199,12 +228,16 @@ def client_contracts(client_id):
         tabs=_client_tabs(client),
         active_tab="contract",
         timedelta=timedelta,
+        current_role=current_user.role,
     )
 
 
 @clients_bp.get("/clients/<int:client_id>/contracts/new", endpoint="contract_new_get")
 @login_required
 def contract_new_get(client_id):
+    if not can_edit_contracts():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.client_contracts", client_id=client_id))
     client = Client.query.get_or_404(client_id)
     return render_template(
         "contract_new.html",
@@ -218,6 +251,9 @@ def contract_new_get(client_id):
 @clients_bp.post("/clients/<int:client_id>/contracts/new", endpoint="contract_new_post")
 @login_required
 def contract_new_post(client_id):
+    if not can_edit_contracts():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.client_contracts", client_id=client_id))
     client = Client.query.get_or_404(client_id)
 
     number = (request.form.get("number") or "").strip()
@@ -235,7 +271,7 @@ def contract_new_post(client_id):
         flash("Неверный формат даты.", "danger")
         return redirect(url_for("clients.contract_new_get", client_id=client.id))
 
-    tariff_name = (request.form.get("tariff_name") or "").strip() or None
+    tariff_name = None
     price_raw = (request.form.get("price_per_liter") or "").strip()
     price_per_liter = None
     if price_raw:
@@ -263,6 +299,7 @@ def contract_new_post(client_id):
     db.session.add(contract)
     db.session.commit()
 
+    notify_event("Создан договор", f"Пользователь {current_user.username} создал договор {contract.number} для клиента {client.name}")
     flash("Договор создан.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract.id))
 
@@ -270,6 +307,9 @@ def contract_new_post(client_id):
 @clients_bp.get("/clients/<int:client_id>/contracts/<int:contract_id>/edit", endpoint="contract_edit_get")
 @login_required
 def contract_edit_get(client_id, contract_id):
+    if not can_edit_contracts():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.client_contracts", client_id=client_id, id=contract_id))
     client = Client.query.get_or_404(client_id)
     contract = Contract.query.filter_by(client_id=client.id, id=contract_id).first_or_404()
 
@@ -286,6 +326,9 @@ def contract_edit_get(client_id, contract_id):
 @clients_bp.post("/clients/<int:client_id>/contracts/<int:contract_id>/edit", endpoint="contract_edit_post")
 @login_required
 def contract_edit_post(client_id, contract_id):
+    if not can_edit_contracts():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.client_contracts", client_id=client_id, id=contract_id))
     client = Client.query.get_or_404(client_id)
     contract = Contract.query.filter_by(client_id=client.id, id=contract_id).first_or_404()
 
@@ -304,7 +347,7 @@ def contract_edit_post(client_id, contract_id):
         flash("Неверный формат даты.", "danger")
         return redirect(url_for("clients.contract_edit_get", client_id=client.id, contract_id=contract.id))
 
-    tariff_name = (request.form.get("tariff_name") or "").strip() or None
+    tariff_name = None
     price_raw = (request.form.get("price_per_liter") or "").strip()
     price_per_liter = None
     if price_raw:
@@ -324,6 +367,7 @@ def contract_edit_post(client_id, contract_id):
     contract.forbidden_groups = (request.form.get("forbidden_groups") or "").strip() or None
 
     db.session.commit()
+    notify_event("Договор обновлен", f"Пользователь {current_user.username} обновил договор {contract.number} клиента {client.name}")
     flash("Договор обновлён.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract.id))
 
@@ -343,6 +387,7 @@ def client_talons(client_id):
     talons = q.order_by(Talon.id.desc()).all()
 
     contracts = Contract.query.filter_by(client_id=client.id).order_by(Contract.id.desc()).all()
+    addendums_map = {str(c.id): [{"id": f.id, "title": (f.original_name or f.title or f"Доп. соглашение #{f.id}"), "approved": f.approval_status == "approved"} for f in c.files if f.kind == "addendum"] for c in contracts}
     balances = Balance.query.filter_by(client_id=client.id).all()
 
     # mapping contract_id -> info (used by JS in template)
@@ -362,6 +407,7 @@ def client_talons(client_id):
         talons=talons,
         contracts=contracts,
         balances_json=json.dumps(balances_map, ensure_ascii=False),
+        addendums_json=json.dumps(addendums_map, ensure_ascii=False),
         date_from=date_from,
         date_to=date_to,
         tabs=_client_tabs(client),
@@ -379,8 +425,25 @@ def client_talons_add(client_id):
 
     contract_id_raw = (request.form.get("contract_id") or "").strip()
     contract_id = int(contract_id_raw) if contract_id_raw.isdigit() else None
+    addendum_file_id_raw = (request.form.get("addendum_file_id") or "").strip()
+    addendum_file_id = int(addendum_file_id_raw) if addendum_file_id_raw.isdigit() else None
 
     product_name = (request.form.get("product_name") or "ГАЗ").strip() or "ГАЗ"
+    if contract_id is None:
+        flash("Выберите договор.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+    contract = Contract.query.filter_by(client_id=client.id, id=contract_id).first()
+    if not contract:
+        flash("Договор не найден.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+    if not contract_is_approved(contract):
+        flash("Основной договор не подтвержден директором/замдиректора.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+    if addendum_file_id:
+        addendum = ContractFile.query.filter_by(id=addendum_file_id, contract_id=contract.id, kind="addendum").first()
+        if not addendum or addendum.approval_status != "approved":
+            flash("Выбранное доп. соглашение не подтверждено.", "danger")
+            return redirect(url_for("clients.client_talons", client_id=client.id))
 
     try:
         liters = float((request.form.get("liters") or "0").replace(",", "."))
@@ -452,10 +515,12 @@ def client_talons_add(client_id):
             valid_from=valid_from,
             valid_to=valid_to,
             state="active",
+            addendum_file_id=addendum_file_id,
         )
         db.session.add(t)
 
     db.session.commit()
+    notify_event("Созданы талоны", f"Пользователь {current_user.username} создал {qty} талонов для клиента {client.name} по договору {contract.number}")
     flash(f"Создано талонов: {qty}", "success")
     return redirect(url_for(
         "clients.client_talons",
@@ -469,6 +534,12 @@ def client_talons_add(client_id):
 @login_required
 def talon_use(talon_id):
     t = Talon.query.get_or_404(talon_id)
+    status = talon_status(t)
+    if status == "expired":
+        t.state = "expired"
+        db.session.commit()
+        flash("Срок действия талона истек", "danger")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
     if t.state == "used":
         flash("Талон уже использован", "warning")
         return redirect(url_for("clients.client_talons", client_id=t.client_id))
@@ -478,9 +549,33 @@ def talon_use(talon_id):
     t.used_by_user_id = current_user.id
     db.session.commit()
 
+    notify_event("Талон использован", f"Талон {t.serial_number} клиента {t.client.name if t.client else t.client_id} использован пользователем {current_user.username}")
     flash("Талон использован", "success")
     return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
+
+@clients_bp.post("/talons/<int:talon_id>/extend")
+@login_required
+def talon_extend(talon_id):
+    t = Talon.query.get_or_404(talon_id)
+    if not has_role("director", "deputy_director"):
+        flash("Продлевать талоны может только директор или замдиректора.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+    try:
+        new_valid_to = datetime.strptime(request.form.get("new_valid_to") or "", "%Y-%m-%d").date()
+    except Exception:
+        flash("Укажите новую дату окончания.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+    if new_valid_to <= date.today():
+        flash("Новая дата должна быть больше сегодняшней.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+    t.valid_to = new_valid_to
+    if t.state == "expired":
+        t.state = "active"
+    db.session.commit()
+    notify_event("Талон продлен", f"Талон {t.serial_number} продлен до {new_valid_to} пользователем {current_user.username}")
+    flash("Срок действия талона продлен.", "success")
+    return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
 # ---------------- QR ----------------
 @clients_bp.get("/talons/<int:talon_id>/qr.png")

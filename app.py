@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 
 from flask import (
     Flask, redirect, url_for, request, jsonify, render_template,
-    abort, current_app
+    abort
 )
 from flask_login import LoginManager, login_required
 from supabase import create_client
@@ -22,8 +22,6 @@ from clients import clients_bp
 from reports import reports_bp
 from helpers import require_roles, talon_status_label, format_kz
 from mail_utils import send_daily_report
-
-# ✅ Файлы договоров (PDF) — блюпринт
 from contract_files import contract_files_bp
 
 
@@ -41,11 +39,28 @@ def create_app():
     def load_user(user_id):
         return User.query.get(int(user_id))
 
-    # ✅ Регистрируем блюпринты
+    @app.context_processor
+    def inject_role_label():
+        def role_label(role):
+            labels = {
+                "admin": "Администратор",
+                "director": "Директор",
+                "zamdirector": "Заместитель директора",
+                "deputy_director": "Заместитель директора",
+                "manager": "Менеджер",
+                "operator": "Оператор",
+                "executor": "Исполнитель",
+            }
+            return labels.get(role, role)
+        return dict(role_label=role_label)
 
     @app.context_processor
     def inject_template_helpers():
-        return {"talon_status_label": talon_status_label, "format_kz": format_kz}
+        return {
+            "talon_status_label": talon_status_label,
+            "format_kz": format_kz
+        }
+
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
     app.register_blueprint(reports_bp)
@@ -55,7 +70,6 @@ def create_app():
     def home():
         return redirect(url_for("clients.list_clients"))
 
-    # ✅ Открытие PDF через Supabase Storage (signed url)
     @app.get("/files/contracts/<int:file_id>")
     @login_required
     def download_contract_file(file_id: int):
@@ -83,7 +97,6 @@ def create_app():
 
         return redirect(signed_url)
 
-
     @app.post("/admin/send-daily-report")
     @login_required
     @require_roles("director", "deputy_director")
@@ -91,7 +104,6 @@ def create_app():
         ok = send_daily_report()
         return jsonify({"ok": bool(ok)})
 
-    # ---------------- Telegram WebApp (QR scanner) ----------------
     @app.get("/tg/scan")
     def tg_scan():
         token = request.args.get("token", "").strip()
@@ -110,7 +122,6 @@ def create_app():
         if t is None or t.expires_at < datetime.utcnow():
             return jsonify({"ok": False, "error": "token_expired"}), 401
 
-        # active bot session
         sess = BotSession.query.filter_by(
             telegram_user_id=t.telegram_user_id,
             is_active=True
@@ -127,12 +138,13 @@ def create_app():
             db.session.commit()
             return jsonify({"ok": False, "error": "expired"}), 409
 
-        # already used?
         if getattr(talon, "state", None) == "used":
-            last = (TalonRedemption.query
-                    .filter_by(talon_id=talon.id)
-                    .order_by(TalonRedemption.used_at.desc())
-                    .first())
+            last = (
+                TalonRedemption.query
+                .filter_by(talon_id=talon.id)
+                .order_by(TalonRedemption.used_at.desc())
+                .first()
+            )
             return jsonify({
                 "ok": False,
                 "error": "already_used",
@@ -140,7 +152,6 @@ def create_app():
                 "agzs": last.agzs.name if last and last.agzs else None
             }), 409
 
-        # mark used
         talon.state = "used"
         talon.used_at = datetime.utcnow()
         talon.used_agzs_id = sess.agzs_id
@@ -166,12 +177,7 @@ def create_app():
             "agzs": sess.agzs.name if sess.agzs else None
         })
 
-    # ---------------- DB init (SAFE) ----------------
     def init_db(seed: bool = False):
-        """
-        SAFE MODE (default): only creates tables, DOES NOT insert test data.
-        SEED MODE: inserts initial data (admin/agzs/etc). Run ONLY when INIT_DB=1.
-        """
         from datetime import date, timedelta
 
         with app.app_context():
@@ -193,11 +199,13 @@ def create_app():
                 deputy = User(username="zamdirector", role="deputy_director")
                 deputy.set_password(os.getenv("DEPUTY_PASSWORD", "zamdirector123"))
                 db.session.add(deputy)
+
             executor = User.query.filter_by(username="executor").first()
             if executor is None:
                 executor = User(username="executor", role="executor")
                 executor.set_password(os.getenv("EXECUTOR_PASSWORD", "executor123"))
                 db.session.add(executor)
+
             db.session.commit()
 
             c = Client.query.first()
@@ -281,12 +289,11 @@ def create_app():
 
                 db.session.commit()
 
-
     def ensure_schema():
         insp = inspect(db.engine)
 
         def add_column(table, column_sql, column_name):
-            cols = {c['name'] for c in insp.get_columns(table)}
+            cols = {c["name"] for c in insp.get_columns(table)}
             if column_name not in cols:
                 try:
                     db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {column_sql}"))
@@ -294,12 +301,12 @@ def create_app():
                 except Exception:
                     db.session.rollback()
 
-        add_column('user', 'role VARCHAR(30)', 'role')
-        add_column('contract_files', "approval_status VARCHAR(20) DEFAULT 'approved'", 'approval_status')
-        add_column('contract_files', 'uploaded_by_user_id INTEGER', 'uploaded_by_user_id')
-        add_column('contract_files', 'approved_by_user_id INTEGER', 'approved_by_user_id')
-        add_column('contract_files', 'approved_at DATETIME', 'approved_at')
-        add_column('talon', 'addendum_file_id INTEGER', 'addendum_file_id')
+        add_column("user", "role VARCHAR(30)", "role")
+        add_column("contract_files", "approval_status VARCHAR(20) DEFAULT 'approved'", "approval_status")
+        add_column("contract_files", "uploaded_by_user_id INTEGER", "uploaded_by_user_id")
+        add_column("contract_files", "approved_by_user_id INTEGER", "approved_by_user_id")
+        add_column("contract_files", "approved_at DATETIME", "approved_at")
+        add_column("talon", "addendum_file_id INTEGER", "addendum_file_id")
 
     init_db(seed=False)
 

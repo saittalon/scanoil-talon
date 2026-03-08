@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+  <div class="hero-kicker">Аналитика</div>
+  <div class="hero-title">Отчёты и графики по реализации СУГ</div>
+  <div class="hero-subtitle">Здесь собраны все отчёты: общий по всем клиентам и персональный по каждому клиенту. Добавлен более современный вид, чтобы система была заметно сильнее старого ScanOil.</div>
+</div>
+
+<div class="report-grid">
+  <div class="card card-soft section-card">
+    <div class="section-title">По всем клиентам</div>
+    <div class="section-subtitle">Операции по использованным талонам за выбранный период, плюс график и Excel.</div>
+    <a class="btn btn-brand" href="/reports/all">Открыть общий отчёт</a>
+  </div>
+
+  <div class="card card-soft section-card">
+    <div class="section-title">Отчёт по клиенту</div>
+    <div class="section-subtitle">Выбери клиента и открой подробную таблицу талонов, остатков и выгрузку.</div>
+    <div class="d-flex gap-2 flex-wrap">
+      <select class="form-select" id="clientSelect">
+        {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-outline-secondary" onclick="goClientReport()">Открыть</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function goClientReport(){
+  const id = document.getElementById('clientSelect').value;
+  if(!id) return;
+  window.location.href = `/clients/${id}/reports`;
+}
+</script>
+{% endblock %}

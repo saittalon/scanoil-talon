@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_client_header.html" %}
+<div class="card card-soft">
+  <div class="card-body">
+    <h5 class="mb-3">Профиль</h5>
+    <div class="row g-3">
+      <div class="col-md-6"><div class="text-muted small">БИН</div><div>{{ client.bin or "-" }}</div></div>
+      <div class="col-md-6"><div class="text-muted small">E-mail</div><div>{{ client.email or "-" }}</div></div>
+      <div class="col-md-6"><div class="text-muted small">Телефон</div><div>{{ client.phone or "-" }}</div></div>
+      <div class="col-md-6"><div class="text-muted small">Юр. адрес</div><div>{{ client.legal_address or "-" }}</div></div>
+      <div class="col-12"><div class="text-muted small">Комментарий</div><div>{{ client.comment or "-" }}</div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_client_header.html" %}
+
+<div class="page-hero">
+  <div class="hero-kicker">Остатки по клиенту</div>
+  <div class="hero-title">Баланс СУГ и контроль лимитов</div>
+  <div class="hero-subtitle">Новый вид страницы остатков делает баланс понятным: видно продукт, договор и дату обновления.</div>
+</div>
+
+<div class="card card-soft section-card">
+  {% if not balances %}
+    <div class="empty-state">Пока нет записей баланса.</div>
+  {% else %}
+    <div class="balance-hero mb-4">
+      <div class="info-card"><h6>Всего записей</h6><div class="info-value">{{ balances|length }}</div></div>
+      <div class="info-card"><h6>Сумма литров</h6><div class="info-value">{{ '%.0f'|format(balances|sum(attribute='liters_left')) }} л</div></div>
+      <div class="info-card"><h6>Контроль активен</h6><div class="info-value">{{ balances|selectattr('balance_control')|list|length }}</div></div>
+    </div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr><th>Товар</th><th>Литры</th><th>Контроль</th><th>Договор</th><th>Обновлено</th></tr></thead>
+          <tbody>
+          {% for b in balances %}
+            <tr>
+              <td>{{ b.product_name }}</td>
+              <td><b>{{ '%.2f'|format(b.liters_left or 0) }} л</b></td>
+              <td>{{ "Да" if b.balance_control else "Нет" }}</td>
+              <td>{{ b.contract.number if b.contract else "—" }}</td>
+              <td>{{ b.updated_at }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

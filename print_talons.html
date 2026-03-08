@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Печать талонов — {{ client.name }}</title>
+  <style>
+    @page { size: A4; margin: 8mm; }
+    body { font-family: Arial, sans-serif; margin: 0; }
+
+    .toolbar { padding: 8px; display: flex; gap: 10px; align-items: center; }
+    .btn { display: inline-block; padding: 8px 12px; border-radius: 6px; border: 1px solid #111; text-decoration: none; color: #111; font-size: 14px; }
+    .btn-primary { background: #111; color: #fff; }
+    @media print { 
+      .toolbar { display: none; }
+      body { margin: 0; }
+    }
+
+    /* Сетка 4 колонки, без отступов */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      padding: 0;
+    }
+
+    .ticket {
+      border: 1px solid #e6e6e6;
+      box-sizing: border-box;
+      height: 70mm; /* увеличенная высота для QR и текста */
+      padding: 3mm;
+      background: #fff;
+
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-inside: avoid;
+    }
+
+    .liters { font-size: 18px; font-weight: 800; text-align: center; }
+    .logo { height: 12mm; object-fit: contain; margin: 3px 0; }
+
+    /* Обёртка QR и текста */
+    .qr-wrapper {
+      width: 34mm; /* размер QR */
+      margin: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .qr {
+      width: 34mm;
+      height: 34mm;
+      display: block;
+    }
+
+    /* Код и дата расположены под QR */
+    .code {
+      margin-top: 6px;  /* отступ сверху */
+      font-weight: bold;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-align: center;
+    }
+
+    .date {
+      font-size: 9px;
+      color: #333;
+      margin-top: 2px;
+      text-align: center;
+    }
+
+    .footer {
+      font-size: 7.5px;
+      display: flex;
+      justify-content: space-between;
+      color: #666;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="toolbar">
+    <a class="btn btn-primary" href="{{ url_for('clients.print_talons_pdf', client_id=client.id) }}">Скачать PDF</a>
+    <a class="btn" href="javascript:window.print()">Печать</a>
+  </div>
+
+  <div class="grid">
+    {% for t in talons %}
+      <div class="ticket">
+        <div class="liters">{{ "%.0f"|format(t.liters) }} л</div>
+
+        <img class="logo" src="{{ logo_url }}" alt="logo">
+
+        <div class="qr-wrapper">
+          <img class="qr" src="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}" alt="qr">
+          <div class="code">{{ t.code }}</div>
+          <div class="date">
+            {{ t.valid_from.strftime("%d.%m.%Y") }} -
+            {% if t.valid_to %}
+              {{ t.valid_to.strftime("%d.%m.%Y") }}
+            {% else %}
+              {{ (t.valid_from + timedelta(days=30)).strftime("%d.%m.%Y") }}
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="footer">
+          <span>№ {{ t.serial_number }}</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</body>
+</html>

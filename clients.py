@@ -794,28 +794,44 @@ def print_talons_pdf(client_id):
     return send_file(buf, mimetype="application/pdf", as_attachment=False, download_name=filename)
 
 # ---------------- Отчёты клиента ----------------
-@clients_bp.get("/clients/<int:client_id>/reports")
+@clients_bp.get("/clients/<int:client_id>/talons")
 @login_required
-def client_reports(client_id):
+def client_talons(client_id):
     client = Client.query.get_or_404(client_id)
-
-    date_from = request.args.get("date_from")
-    date_to = request.args.get("date_to")
+    date_from = (request.args.get("date_from") or "").strip() or None
+    date_to = (request.args.get("date_to") or "").strip() or None
 
     q = Talon.query.filter_by(client_id=client.id)
     if date_from:
         q = q.filter(Talon.valid_from >= date_from)
     if date_to:
         q = q.filter(Talon.valid_to <= date_to)
-
     talons = q.order_by(Talon.id.desc()).all()
 
+    contracts = Contract.query.filter_by(client_id=client.id).order_by(Contract.id.desc()).all()
+    addendums_map = {str(c.id): [{"id": f.id, "title": (f.original_name or f.title or f"Доп. соглашение #{f.id}"), "approved": f.approval_status == "approved"} for f in c.files if f.kind == "addendum"] for c in contracts}
+    balances = Balance.query.filter_by(client_id=client.id).all()
+
+    # mapping contract_id -> info (used by JS in template)
+    balances_map = {}
+    for b in balances:
+        if b.contract_id is None:
+            continue
+        balances_map[str(b.contract_id)] = {
+            "liters_left": float(b.liters_left or 0),
+            "balance_control": bool(b.balance_control),
+            "product_name": b.product_name,
+        }
+
     return render_template(
-        "client_reports.html",
+        "client_talons.html",
         client=client,
         talons=talons,
+        contracts=contracts,
+        balances_json=json.dumps(balances_map, ensure_ascii=False),
+        addendums_json=json.dumps(addendums_map, ensure_ascii=False),
         date_from=date_from,
         date_to=date_to,
         tabs=_client_tabs(client),
-        active_tab="reports",
+        active_tab="talons",
     )

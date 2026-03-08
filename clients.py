@@ -798,21 +798,55 @@ def print_talons_pdf(client_id):
 @login_required
 def client_talons(client_id):
     client = Client.query.get_or_404(client_id)
+
     date_from = (request.args.get("date_from") or "").strip() or None
     date_to = (request.args.get("date_to") or "").strip() or None
+    status = (request.args.get("status") or "active").strip().lower()
 
     q = Talon.query.filter_by(client_id=client.id)
+
     if date_from:
-        q = q.filter(Talon.valid_from >= date_from)
+        try:
+            df = datetime.strptime(date_from, "%Y-%m-%d").date()
+            q = q.filter(Talon.valid_from >= df)
+        except ValueError:
+            date_from = None
+
     if date_to:
-        q = q.filter(Talon.valid_to <= date_to)
+        try:
+            dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+            q = q.filter(Talon.valid_to <= dt)
+        except ValueError:
+            date_to = None
+
+    today = kz_today()
+
+    if status == "used":
+        q = q.filter(Talon.state == "used")
+    elif status == "expired":
+        q = q.filter(Talon.state != "used", Talon.valid_to < today)
+    else:
+        status = "active"
+        q = q.filter(Talon.state == "active", Talon.valid_to >= today)
+
     talons = q.order_by(Talon.id.desc()).all()
 
     contracts = Contract.query.filter_by(client_id=client.id).order_by(Contract.id.desc()).all()
-    addendums_map = {str(c.id): [{"id": f.id, "title": (f.original_name or f.title or f"Доп. соглашение #{f.id}"), "approved": f.approval_status == "approved"} for f in c.files if f.kind == "addendum"] for c in contracts}
+
+    addendums_map = {
+        str(c.id): [
+            {
+                "id": f.id,
+                "title": (f.original_name or f.title or f"Доп. соглашение #{f.id}"),
+                "approved": f.approval_status == "approved"
+            }
+            for f in c.files if f.kind == "addendum"
+        ]
+        for c in contracts
+    }
+
     balances = Balance.query.filter_by(client_id=client.id).all()
 
-    # mapping contract_id -> info (used by JS in template)
     balances_map = {}
     for b in balances:
         if b.contract_id is None:
@@ -832,6 +866,7 @@ def client_talons(client_id):
         addendums_json=json.dumps(addendums_map, ensure_ascii=False),
         date_from=date_from,
         date_to=date_to,
+        status=status,
         tabs=_client_tabs(client),
         active_tab="talons",
     )

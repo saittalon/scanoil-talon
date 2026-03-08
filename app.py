@@ -119,21 +119,23 @@ def create_app():
             return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
 
         t = WebAppToken.query.filter_by(token=token).first()
-        if t is None or t.expires_at < datetime.utcnow():
+        if t is None or t.expires_at < kz_now():
             return jsonify({"ok": False, "error": "token_expired"}), 401
 
         sess = BotSession.query.filter_by(
             telegram_user_id=t.telegram_user_id,
             is_active=True
         ).first()
+
         if sess is None:
             return jsonify({"ok": False, "error": "not_logged_in"}), 401
 
         talon = Talon.query.filter_by(code=code).first()
+
         if talon is None:
             return jsonify({"ok": False, "error": "talon_not_found"}), 404
 
-        if talon.valid_to and talon.valid_to < datetime.utcnow().date():
+        if talon.valid_to and talon.valid_to < kz_now().date():
             talon.state = "expired"
             db.session.commit()
             return jsonify({"ok": False, "error": "expired"}), 409
@@ -145,6 +147,7 @@ def create_app():
                 .order_by(TalonRedemption.used_at.desc())
                 .first()
             )
+
             return jsonify({
                 "ok": False,
                 "error": "already_used",
@@ -161,9 +164,10 @@ def create_app():
             talon_id=talon.id,
             agzs_id=sess.agzs_id,
             telegram_user_id=str(sess.telegram_user_id),
-            used_at=datetime.now(),
+            used_at=kz_now(),
             source="telegram_webapp"
         )
+
         db.session.add(red)
         db.session.commit()
 
@@ -176,142 +180,6 @@ def create_app():
             "valid_to": str(getattr(talon, "valid_to", "")),
             "agzs": sess.agzs.name if sess.agzs else None
         })
-
-    def init_db(seed: bool = False):
-        from datetime import date, timedelta
-
-        with app.app_context():
-            db.create_all()
-            ensure_schema()
-
-            if not seed:
-                return
-
-            admin = User.query.filter_by(username="director").first()
-            if admin is None:
-                admin = User(username="director", role="director")
-                admin.set_password(os.getenv("ADMIN_PASSWORD", "director123"))
-                db.session.add(admin)
-                db.session.commit()
-
-            deputy = User.query.filter_by(username="zamdirector").first()
-            if deputy is None:
-                deputy = User(username="zamdirector", role="deputy_director")
-                deputy.set_password(os.getenv("DEPUTY_PASSWORD", "zamdirector123"))
-                db.session.add(deputy)
-
-            executor = User.query.filter_by(username="executor").first()
-            if executor is None:
-                executor = User(username="executor", role="executor")
-                executor.set_password(os.getenv("EXECUTOR_PASSWORD", "executor123"))
-                db.session.add(executor)
-
-            db.session.commit()
-
-            c = Client.query.first()
-            if c is None:
-                c = Client(name="Проверка 121212", full_name="ТОО Проверка", comment="проверка")
-                db.session.add(c)
-                db.session.commit()
-
-            agzs_names = [
-                "Жангельдина", "Ст город", "Капал батыр", "Миг",
-                "Основная - База", "Сан Ойл", "Шнос", "Сайман",
-                "Самал", "Сырым батыр", "Центральная", "Степная",
-                "Мадели Кожа - Сигма", "Тассай - Аксумбе",
-                "Қызылсай", "Казыгурт",
-                "База 2 - Жибек Жолы",
-                "Кайтпас - Толеметова",
-                "Алмаз",
-            ]
-            for name in agzs_names:
-                if AGZS.query.filter_by(name=name).first() is None:
-                    a = AGZS(name=name, login=name, is_active=True)
-                    a.set_password(f"{name}123")
-                    db.session.add(a)
-            db.session.commit()
-
-            contract = Contract.query.first()
-            if contract is None:
-                contract = Contract(
-                    client_id=c.id,
-                    number="проверка от 28.01.2026",
-                    date_from=date(2026, 1, 28),
-                    date_to=date(2026, 12, 31),
-                    tariff_name="Газ 102тг",
-                    price_per_liter=102.0,
-                    online=True,
-                    allow_all_stations=False,
-                    forbidden_groups="МурАз (Туркестанская обл.)"
-                )
-                db.session.add(contract)
-                db.session.commit()
-
-            bal = Balance.query.filter_by(client_id=c.id, contract_id=contract.id).first()
-            if bal is None:
-                bal = Balance(
-                    client_id=c.id,
-                    contract_id=contract.id,
-                    product_name="ГАЗ",
-                    liters_left=50.0,
-                    balance_control=True
-                )
-                db.session.add(bal)
-                db.session.commit()
-
-            if Talon.query.count() == 0:
-                today = datetime.utcnow().date()
-                till = (datetime.utcnow() + timedelta(days=60)).date()
-
-                for i in range(4):
-                    is_used = i < 2
-                    used_at = (
-                        datetime(2026, 2, 10, 12, 30, 0) if i == 0
-                        else datetime(2026, 2, 18, 9, 15, 0) if i == 1
-                        else None
-                    )
-
-                    tln = Talon(
-                        client_id=c.id,
-                        contract_id=contract.id,
-                        holder_name=c.name,
-                        product_name="ГАЗ",
-                        liters=10.0,
-                        serial_number=str(i + 1).zfill(5),
-                        code=str(1800000000 + i * 12345),
-                        valid_from=today,
-                        valid_to=till,
-                        state="used" if is_used else "active",
-                        used_at=used_at,
-                        used_by_user_id=admin.id if is_used else None
-                    )
-                    db.session.add(tln)
-
-                db.session.commit()
-
-    def ensure_schema():
-        insp = inspect(db.engine)
-
-        def add_column(table, column_sql, column_name):
-            cols = {c["name"] for c in insp.get_columns(table)}
-            if column_name not in cols:
-                try:
-                    db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {column_sql}"))
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
-
-        add_column("user", "role VARCHAR(30)", "role")
-        add_column("contract_files", "approval_status VARCHAR(20) DEFAULT 'approved'", "approval_status")
-        add_column("contract_files", "uploaded_by_user_id INTEGER", "uploaded_by_user_id")
-        add_column("contract_files", "approved_by_user_id INTEGER", "approved_by_user_id")
-        add_column("contract_files", "approved_at DATETIME", "approved_at")
-        add_column("talon", "addendum_file_id INTEGER", "addendum_file_id")
-
-    init_db(seed=False)
-
-    if os.getenv("INIT_DB", "0") == "1":
-        init_db(seed=True)
 
     return app
 

@@ -23,25 +23,37 @@ WEBAPP_BASE_URL = os.getenv("WEBAPP_BASE_URL", "").strip().rstrip("/")
 LOGIN, PASSWORD, ENTER_CODE = range(3)
 
 
-def _main_keyboard(scan_url: str | None = None):
-    rows = [
-        [KeyboardButton("⌨️ Ввести код талона")],
-    ]
-
-    # Telegram WebApp button (opens camera scanner page)
-    if scan_url:
-        rows.append([KeyboardButton("📷 Сканировать QR", web_app=WebAppInfo(url=scan_url))])
-
-    rows.append([KeyboardButton("🚪 Выйти")])
-
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
-
-
 def _auth_keyboard():
     return ReplyKeyboardMarkup(
         [[KeyboardButton("🔐 Войти")]],
         resize_keyboard=True,
     )
+
+
+def _shift_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🟢 ОТКРЫТЬ СМЕНУ")],
+            [KeyboardButton("🚪 Выйти")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def _main_keyboard(scan_url: str | None = None):
+    rows = []
+
+    # Делаем кнопку сканирования максимально заметной для пожилых пользователей
+    if scan_url:
+        rows.append([KeyboardButton("📷 СКАНИРОВАТЬ", web_app=WebAppInfo(url=scan_url))])
+    else:
+        rows.append([KeyboardButton("📷 СКАНИРОВАТЬ")])
+
+    rows.append([KeyboardButton("⌨️ ВВЕСТИ КОД ВРУЧНУЮ")])
+    rows.append([KeyboardButton("📋 МЕНЮ")])
+    rows.append([KeyboardButton("🚪 Выйти")])
+
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def _only_digits(text):
@@ -56,6 +68,14 @@ def _get_session(tg_id):
         telegram_user_id=str(tg_id),
         is_active=True
     ).first()
+
+
+def _shift_open(context: ContextTypes.DEFAULT_TYPE, tg_user_id: int) -> bool:
+    return bool(context.user_data.get(f"shift_open_{tg_user_id}"))
+
+
+def _set_shift_open(context: ContextTypes.DEFAULT_TYPE, tg_user_id: int, value: bool):
+    context.user_data[f"shift_open_{tg_user_id}"] = bool(value)
 
 
 def _make_scan_url(flask_app, tg_user_id: int) -> str | None:
@@ -137,8 +157,11 @@ async def password_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         db.session.commit()
 
-    scan_url = _make_scan_url(app, update.effective_user.id)
-    await update.message.reply_text("✅ Вход выполнен", reply_markup=_main_keyboard(scan_url))
+    _set_shift_open(context, update.effective_user.id, False)
+    await update.message.reply_text(
+        "✅ Вход выполнен\nТеперь нажмите 🟢 ОТКРЫТЬ СМЕНУ",
+        reply_markup=_shift_keyboard()
+    )
     return ConversationHandler.END
 
 
@@ -150,10 +173,23 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sess.is_active = False
             db.session.commit()
 
+    _set_shift_open(context, update.effective_user.id, False)
     await update.message.reply_text("Вы вышли", reply_markup=_auth_keyboard())
 
 
 async def enter_code_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    app = context.application.bot_data["flask_app"]
+    with app.app_context():
+        sess = _get_session(update.effective_user.id)
+
+    if not sess:
+        await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
+        return ConversationHandler.END
+
+    if not _shift_open(context, update.effective_user.id):
+        await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
+        return ConversationHandler.END
+
     await update.message.reply_text("Введите код талона:")
     return ENTER_CODE
 
@@ -227,6 +263,46 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
+async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    app = context.application.bot_data["flask_app"]
+    tg_user_id = update.effective_user.id
+    with app.app_context():
+        sess = _get_session(tg_user_id)
+
+    if not sess:
+        await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
+        return
+
+    _set_shift_open(context, tg_user_id, True)
+    scan_url = _make_scan_url(app, tg_user_id)
+    await update.message.reply_text(
+        f"🟢 Смена открыта: {sess.agzs.name}\nВыберите действие в меню.",
+        reply_markup=_main_keyboard(scan_url)
+    )
+
+
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    app = context.application.bot_data["flask_app"]
+    tg_user_id = update.effective_user.id
+    with app.app_context():
+        sess = _get_session(tg_user_id)
+
+    if not sess:
+        await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
+        return
+
+    if not _shift_open(context, tg_user_id):
+        await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
+        return
+
+    scan_url = _make_scan_url(app, tg_user_id)
+    await update.message.reply_text("📋 Меню открыто", reply_markup=_main_keyboard(scan_url))
+
+
+async def scan_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await scan(update, context)
+
 def main():
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN не задан")
@@ -249,13 +325,16 @@ def main():
     ))
 
     application.add_handler(ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^⌨️ Ввести код талона$"), enter_code_begin)],
+        entry_points=[MessageHandler(filters.Regex(r"^⌨️ ВВЕСТИ КОД ВРУЧНУЮ$"), enter_code_begin)],
         states={
             ENTER_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_code_got)],
         },
         fallbacks=[CommandHandler("start", start)],
     ))
 
+    application.add_handler(MessageHandler(filters.Regex(r"^🟢 ОТКРЫТЬ СМЕНУ$"), open_shift))
+    application.add_handler(MessageHandler(filters.Regex(r"^📋 МЕНЮ$"), show_menu))
+    application.add_handler(MessageHandler(filters.Regex(r"^📷 СКАНИРОВАТЬ$"), scan_button))
     application.add_handler(MessageHandler(filters.Regex("^🚪 Выйти$"), logout))
 
     application.run_polling()

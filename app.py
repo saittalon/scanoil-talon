@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import inspect, text
 
 from flask import (
@@ -119,7 +119,16 @@ def create_app():
             return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
 
         t = WebAppToken.query.filter_by(token=token).first()
-        if t is None or t.expires_at < kz_now():
+        if t is None:
+            return jsonify({"ok": False, "error": "token_expired"}), 401
+
+        expires_at = t.expires_at
+        if getattr(expires_at, "tzinfo", None) is not None:
+            expires_at_utc = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+        else:
+            expires_at_utc = expires_at
+
+        if expires_at_utc < datetime.utcnow():
             return jsonify({"ok": False, "error": "token_expired"}), 401
 
         sess = BotSession.query.filter_by(

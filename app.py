@@ -20,7 +20,7 @@ from models import (
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
-from helpers import require_roles, talon_status_label, format_kz
+from helpers import require_roles, talon_status_label, format_kz, kz_now
 from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 
@@ -153,7 +153,7 @@ def create_app():
             }), 409
 
         talon.state = "used"
-        talon.used_at = datetime.now()
+        talon.used_at = kz_now()
         talon.used_agzs_id = sess.agzs_id
         talon.used_telegram_user_id = str(sess.telegram_user_id)
 

@@ -1,14 +1,15 @@
 from functools import wraps
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from flask import flash, redirect, request
 from flask_login import current_user
 
 KZ_TZ = ZoneInfo("Asia/Almaty")
+UTC_TZ = timezone.utc
 
 
 def kz_now():
-    return datetime.now(timezone.utc).astimezone(KZ_TZ)
+    return datetime.now(KZ_TZ)
 
 
 def kz_today():
@@ -18,10 +19,12 @@ def kz_today():
 def to_kz(dt):
     if not dt:
         return None
+
+    # Если datetime без timezone, считаем что он сохранен в UTC
+    # и переводим в Казахстанское время
     if getattr(dt, "tzinfo", None) is None:
-        # В проекте часто сохраняется naїve datetime уже в местном времени.
-        # Поэтому не сдвигаем его ещё раз на +5 часов, а считаем временем Казахстана.
-        return dt.replace(tzinfo=KZ_TZ)
+        dt = dt.replace(tzinfo=UTC_TZ)
+
     return dt.astimezone(KZ_TZ)
 
 
@@ -39,28 +42,28 @@ def require_roles(*roles):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if not has_role(*roles):
-                flash('Недостаточно прав.', 'danger')
-                return redirect(request.referrer or '/')
+                flash("Недостаточно прав.", "danger")
+                return redirect(request.referrer or "/")
             return fn(*args, **kwargs)
         return wrapper
     return decorator
 
 
 def talon_status(talon):
-    if getattr(talon, 'state', None) == 'used':
-        return 'used'
-    if getattr(talon, 'state', None) == 'blocked':
-        return 'blocked'
-    if getattr(talon, 'valid_to', None) and talon.valid_to < kz_today():
-        return 'expired'
-    return getattr(talon, 'state', None) or 'active'
+    if getattr(talon, "state", None) == "used":
+        return "used"
+    if getattr(talon, "state", None) == "blocked":
+        return "blocked"
+    if getattr(talon, "valid_to", None) and talon.valid_to < kz_today():
+        return "expired"
+    return getattr(talon, "state", None) or "active"
 
 
 def talon_status_label(talon):
     mapping = {
-        'active': 'Активен',
-        'used': 'Использован',
-        'expired': 'Срок действия истек',
-        'blocked': 'Заблокирован',
+        "active": "Активен",
+        "used": "Использован",
+        "expired": "Срок действия истек",
+        "blocked": "Заблокирован",
     }
-    return mapping.get(talon_status(talon), 'Активен')
+    return mapping.get(talon_status(talon), "Активен")

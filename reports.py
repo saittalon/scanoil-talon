@@ -2,8 +2,8 @@ from flask import Blueprint, send_file, render_template, request
 from flask_login import login_required
 from io import BytesIO
 import pandas as pd
-from models import Client, Talon, AGZS
-from helpers import talon_status
+from models import Client, Talon
+from helpers import talon_status, talon_status_code, format_kz_datetime
 
 reports_bp = Blueprint('reports', __name__)
 
@@ -20,8 +20,7 @@ def _client_rows(talons, client):
             'С': t.valid_from.strftime('%d.%m.%Y') if t.valid_from else '',
             'По': t.valid_to.strftime('%d.%m.%Y') if t.valid_to else '',
             'Статус': talon_status(t),
-            'Использован': 'Да' if talon_status(t) == 'used' else 'Нет',
-            'Дата использования': t.used_at.strftime('%d.%m.%Y %H:%M') if t.used_at else '',
+            'Дата использования': format_kz_datetime(t.used_at) if t.used_at else '',
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
             'Доп. соглашение': t.addendum_file.original_name if getattr(t, 'addendum_file', None) else '',
             'Талон': t.code,
@@ -85,7 +84,7 @@ def all_clients_report_excel():
             '№ талона': t.serial_number,
             'Код': t.code,
             'Статус': talon_status(t),
-            'Использован': t.used_at.strftime('%d.%m.%Y %H:%M') if t.used_at else '',
+            'Дата использования': format_kz_datetime(t.used_at) if t.used_at else '',
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
             'Услуга': t.product_name,
             'Количество': float(t.liters or 0),
@@ -123,8 +122,8 @@ def reports_all_page():
     for t in talons:
         price = t.contract.price_per_liter if (t.contract and t.contract.price_per_liter is not None) else 0.0
         rows.append({
-            'Дата': t.created_at.strftime('%d.%m.%Y') if t.created_at else '',
-            'Время': t.created_at.strftime('%H:%M:%S') if t.created_at else '',
+            'Дата': format_kz_datetime(t.created_at, '%d.%m.%Y') if t.created_at else '',
+            'Время': format_kz_datetime(t.created_at, '%H:%M:%S') if t.created_at else '',
             'Владелец': t.holder_name,
             'Клиент': t.client.name if t.client else '',
             'Операция': 'Талон',

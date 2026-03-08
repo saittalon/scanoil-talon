@@ -185,14 +185,14 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
         talon.state = "used"
-        talon.used_at = datetime.utcnow()
+        talon.used_at = kz_now()
         talon.used_agzs_id = sess.agzs_id
 
         db.session.add(TalonRedemption(
             talon_id=talon.id,
             agzs_id=sess.agzs_id,
             telegram_user_id=str(sess.telegram_user_id),
-            used_at=datetime.utcnow(),
+            used_at=kz_now(),
             source="telegram"
         ))
         db.session.commit()

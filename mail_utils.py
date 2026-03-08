@@ -4,7 +4,7 @@ from io import BytesIO
 import pandas as pd
 from datetime import datetime
 from models import Client, Talon
-from helpers import talon_status
+from helpers import talon_status, format_kz_datetime
 
 
 def _recipients():
@@ -53,7 +53,7 @@ def daily_report_attachment():
             'Код': t.code,
             'Литры': float(t.liters or 0),
             'Статус': talon_status(t),
-            'Использован': t.used_at.strftime('%d.%m.%Y %H:%M') if t.used_at else '',
+            'Дата использования': format_kz_datetime(t.used_at) if t.used_at else '',
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
         })
     bio = BytesIO()

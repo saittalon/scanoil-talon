@@ -20,7 +20,7 @@ from models import (
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
-from helpers import require_roles
+from helpers import require_roles, kz_now
 from mail_utils import send_daily_report
 
 # ✅ Файлы договоров (PDF) — блюпринт
@@ -50,6 +50,11 @@ def create_app():
     @app.get("/")
     def home():
         return redirect(url_for("clients.list_clients"))
+
+    @app.context_processor
+    def inject_template_helpers():
+        from helpers import role_label
+        return {"role_label": role_label}
 
     # ✅ Открытие PDF через Supabase Storage (signed url)
     @app.get("/files/contracts/<int:file_id>")
@@ -138,7 +143,7 @@ def create_app():
 
         # mark used
         talon.state = "used"
-        talon.used_at = datetime.utcnow()
+        talon.used_at = kz_now()
         talon.used_agzs_id = sess.agzs_id
         talon.used_telegram_user_id = str(sess.telegram_user_id)
 
@@ -146,7 +151,7 @@ def create_app():
             talon_id=talon.id,
             agzs_id=sess.agzs_id,
             telegram_user_id=str(sess.telegram_user_id),
-            used_at=datetime.utcnow(),
+            used_at=kz_now(),
             source="telegram_webapp"
         )
         db.session.add(red)
@@ -278,6 +283,24 @@ def create_app():
                 db.session.commit()
 
 
+
+
+    def ensure_default_users():
+        defaults = [
+            ("director", "director", os.getenv("ADMIN_PASSWORD", "director123")),
+            ("zamdirector", "deputy_director", os.getenv("DEPUTY_PASSWORD", "zamdirector123")),
+            ("deputydirector", "deputy_director", os.getenv("DEPUTY_PASSWORD", "zamdirector123")),
+            ("deputy_director", "deputy_director", os.getenv("DEPUTY_PASSWORD", "zamdirector123")),
+            ("executor", "executor", os.getenv("EXECUTOR_PASSWORD", "executor123")),
+        ]
+        for username, role, password in defaults:
+            user = User.query.filter_by(username=username).first()
+            if user is None:
+                user = User(username=username, role=role)
+                user.set_password(password)
+                db.session.add(user)
+        db.session.commit()
+
     def ensure_schema():
         insp = inspect(db.engine)
 
@@ -298,6 +321,9 @@ def create_app():
         add_column('talon', 'addendum_file_id INTEGER', 'addendum_file_id')
 
     init_db(seed=False)
+
+    with app.app_context():
+        ensure_default_users()
 
     if os.getenv("INIT_DB", "0") == "1":
         init_db(seed=True)

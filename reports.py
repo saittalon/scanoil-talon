@@ -3,7 +3,7 @@ from flask_login import login_required
 from io import BytesIO
 import pandas as pd
 from models import Client, Talon
-from helpers import talon_status, talon_status_code, format_kz_datetime
+from helpers import talon_status_label, format_kz
 
 reports_bp = Blueprint('reports', __name__)
 
@@ -19,8 +19,8 @@ def _client_rows(talons, client):
             'Номинал': float(t.liters or 0),
             'С': t.valid_from.strftime('%d.%m.%Y') if t.valid_from else '',
             'По': t.valid_to.strftime('%d.%m.%Y') if t.valid_to else '',
-            'Статус': talon_status(t),
-            'Дата использования': format_kz_datetime(t.used_at) if t.used_at else '',
+            'Статус': talon_status_label(t),
+            'Дата и время использования': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
             'Доп. соглашение': t.addendum_file.original_name if getattr(t, 'addendum_file', None) else '',
             'Талон': t.code,
@@ -83,8 +83,8 @@ def all_clients_report_excel():
             'Договор': contract.number if contract else '',
             '№ талона': t.serial_number,
             'Код': t.code,
-            'Статус': talon_status(t),
-            'Дата использования': format_kz_datetime(t.used_at) if t.used_at else '',
+            'Статус': talon_status_label(t),
+            'Дата и время использования': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
             'Услуга': t.product_name,
             'Количество': float(t.liters or 0),
@@ -121,9 +121,10 @@ def reports_all_page():
     rows = []
     for t in talons:
         price = t.contract.price_per_liter if (t.contract and t.contract.price_per_liter is not None) else 0.0
+        op_dt = t.used_at or t.created_at
         rows.append({
-            'Дата': format_kz_datetime(t.created_at, '%d.%m.%Y') if t.created_at else '',
-            'Время': format_kz_datetime(t.created_at, '%H:%M:%S') if t.created_at else '',
+            'Дата': format_kz(op_dt, '%d.%m.%Y') if op_dt else '',
+            'Время': format_kz(op_dt, '%H:%M:%S') if op_dt else '',
             'Владелец': t.holder_name,
             'Клиент': t.client.name if t.client else '',
             'Операция': 'Талон',
@@ -133,7 +134,7 @@ def reports_all_page():
             'Стоимость': float(t.liters or 0) * float(price),
             'АЗС': t.used_agzs.name if t.used_agzs else '',
             'Адрес': '',
-            'Статус': talon_status(t),
+            'Статус': talon_status_label(t),
         })
     return render_template('reports_all.html', rows=rows, date_from=date_from, date_to=date_to)
 

@@ -1,10 +1,11 @@
-import os, smtplib
+import os
+import smtplib
+import threading
 from email.message import EmailMessage
 from io import BytesIO
 import pandas as pd
-from datetime import datetime
-from models import Client, Talon
-from helpers import talon_status, format_kz_datetime
+from models import Talon
+from helpers import talon_status_label, format_kz
 
 
 def _recipients():
@@ -19,6 +20,7 @@ def send_email(subject: str, body: str, attachments=None):
     username = os.getenv('SMTP_USERNAME', '').strip()
     password = os.getenv('SMTP_PASSWORD', '').strip()
     sender = os.getenv('MAIL_FROM', username or 'noreply@example.com')
+    use_tls = os.getenv('SMTP_USE_TLS', '1').strip() not in ('0', 'false', 'False')
     if not recipients or not host:
         return False
     msg = EmailMessage()
@@ -29,8 +31,9 @@ def send_email(subject: str, body: str, attachments=None):
     for name, content, mime in attachments or []:
         maintype, subtype = mime.split('/', 1)
         msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=name)
-    with smtplib.SMTP(host, port) as s:
-        s.starttls()
+    with smtplib.SMTP(host, port, timeout=10) as s:
+        if use_tls:
+            s.starttls()
         if username:
             s.login(username, password)
         s.send_message(msg)
@@ -38,9 +41,16 @@ def send_email(subject: str, body: str, attachments=None):
 
 
 def notify_event(subject: str, body: str):
+    def _worker():
+        try:
+            send_email(subject, body)
+        except Exception as e:
+            print(f'EMAIL ERROR: {e}')
     try:
-        return send_email(subject, body)
-    except Exception:
+        threading.Thread(target=_worker, daemon=True).start()
+        return True
+    except Exception as e:
+        print(f'EMAIL THREAD ERROR: {e}')
         return False
 
 
@@ -52,8 +62,8 @@ def daily_report_attachment():
             '№ талона': t.serial_number,
             'Код': t.code,
             'Литры': float(t.liters or 0),
-            'Статус': talon_status(t),
-            'Дата использования': format_kz_datetime(t.used_at) if t.used_at else '',
+            'Статус': talon_status_label(t),
+            'Дата и время использования': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
         })
     bio = BytesIO()
@@ -64,9 +74,8 @@ def daily_report_attachment():
 
 
 def send_daily_report():
-    ts = datetime.now().strftime('%d.%m.%Y %H:%M')
     return send_email(
-        f'Ежедневный отчет по талонам {ts}',
+        'Ежедневный отчет по талонам',
         'Во вложении ежедневный отчет по талонам и клиентам.',
         attachments=[daily_report_attachment()],
     )

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, date
 from io import BytesIO
 
 import qrcode
+from sqlalchemy import or_
 from flask import Blueprint, render_template, redirect, url_for, request, flash, send_file, current_app
 from flask_login import login_required, current_user
 from reportlab.pdfgen import canvas
@@ -15,7 +16,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from models import db, Client, Contract, Balance, Talon, ContractFile
-from helpers import has_role, require_roles, talon_status, talon_status_code, kz_now, format_kz_datetime
+from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz
 from mail_utils import notify_event
 
 clients_bp = Blueprint("clients", __name__)
@@ -101,13 +102,13 @@ def balance_set(client_id):
             product_name=product_name,
             liters_left=liters_left,
             balance_control=balance_control,
-            updated_at=kz_now(),
+            updated_at=datetime.utcnow(),
         )
         db.session.add(bal)
     else:
         bal.liters_left = liters_left
         bal.balance_control = balance_control
-        bal.updated_at = kz_now()
+        bal.updated_at = datetime.utcnow()
 
     db.session.commit()
     notify_event("Обновлен остаток", f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}")
@@ -122,8 +123,13 @@ def list_clients():
     q = (request.args.get("q") or "").strip()
     query = Client.query
     if q:
-        like = f"%{q}%"
-        query = query.filter((Client.name.ilike(like)) | (Client.full_name.ilike(like)))
+        query = query.filter(
+            or_(
+                Client.name.ilike(f"%{q}%"),
+                Client.full_name.ilike(f"%{q}%"),
+                Client.bin.ilike(f"%{q}%")
+            )
+        )
     clients = query.order_by(Client.id.desc()).all()
     return render_template("clients.html", clients=clients, is_admin=is_admin(), current_role=current_user.role, search_query=q)
 
@@ -390,9 +396,6 @@ def client_talons(client_id):
     if date_to:
         q = q.filter(Talon.valid_to <= date_to)
     talons = q.order_by(Talon.id.desc()).all()
-    for t in talons:
-        t.effective_state = talon_status_code(t)
-        t.status_label = talon_status(t)
 
     contracts = Contract.query.filter_by(client_id=client.id).order_by(Contract.id.desc()).all()
     addendums_map = {str(c.id): [{"id": f.id, "title": (f.original_name or f.title or f"Доп. соглашение #{f.id}"), "approved": f.approval_status == "approved"} for f in c.files if f.kind == "addendum"] for c in contracts}
@@ -502,7 +505,7 @@ def client_talons_add(client_id):
             flash(f"Недостаточно остатка по договору: доступно {left:.2f} л, нужно {need:.2f} л.", "danger")
             return redirect(url_for("clients.client_talons", client_id=client.id))
         bal.liters_left = left - need
-        bal.updated_at = kz_now()
+        bal.updated_at = datetime.utcnow()
 
     # генерация серий и кодов
     existing = Talon.query.filter_by(client_id=client.id).count()
@@ -553,12 +556,12 @@ def talon_use(talon_id):
         return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
     t.state = "used"
-    t.used_at = kz_now()
+    t.used_at = datetime.utcnow()
     t.used_by_user_id = current_user.id
     db.session.commit()
 
-    notify_event("Талон использован", f"Талон {t.serial_number} клиента {t.client.name if t.client else t.client_id} использован пользователем {current_user.username}")
-    flash(f"Талон использован: {format_kz_datetime(t.used_at)}", "success")
+    notify_event("Талон использован", f"Талон {t.serial_number} клиента {t.client.name if t.client else t.client_id} использован пользователем {current_user.username} в {format_kz(t.used_at)}")
+    flash("Талон использован", "success")
     return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
 
@@ -790,9 +793,6 @@ def client_reports(client_id):
         q = q.filter(Talon.valid_to <= date_to)
 
     talons = q.order_by(Talon.id.desc()).all()
-    for t in talons:
-        t.effective_state = talon_status_code(t)
-        t.status_label = talon_status(t)
 
     return render_template(
         "client_reports.html",

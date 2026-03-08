@@ -1,21 +1,25 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user
-from sqlalchemy import func
 from models import User
 
 auth_bp = Blueprint('auth', __name__)
 
 
-def _username_aliases(username: str):
-    normalized = (username or '').strip().lower()
-    aliases = {normalized}
-    if normalized in {'zamdirector', 'замдиректора', 'zam', 'deputy', 'deputydirector', 'deputy_director'}:
-        aliases.update({'zamdirector', 'deputydirector', 'deputy_director'})
-    if normalized in {'director', 'директор'}:
-        aliases.add('director')
-    if normalized in {'executor', 'исполнитель'}:
-        aliases.add('executor')
-    return tuple(aliases)
+def _normalize_username(value: str) -> str:
+    raw = (value or '').strip()
+    compact = raw.replace('_', '').replace('-', '').replace(' ', '').lower()
+    aliases = {
+        'director': 'director',
+        'директор': 'director',
+        'zamdirector': 'zamdirector',
+        'deputydirector': 'zamdirector',
+        'zamdir': 'zamdirector',
+        'замдиректора': 'zamdirector',
+        'замдиректор': 'zamdirector',
+        'executor': 'executor',
+        'исполнитель': 'executor',
+    }
+    return aliases.get(compact, raw)
 
 
 @auth_bp.get('/login')
@@ -25,11 +29,10 @@ def login_get():
 
 @auth_bp.post('/login')
 def login_post():
-    username = request.form.get('username', '').strip()
+    username = _normalize_username(request.form.get('username', ''))
     password = request.form.get('password', '').strip()
 
-    aliases = _username_aliases(username)
-    user = User.query.filter(func.lower(User.username).in_(aliases)).first()
+    user = User.query.filter_by(username=username).first()
     if not user or not user.check_password(password):
         flash('Неверный логин или пароль', 'danger')
         return redirect(url_for('auth.login_get'))

@@ -2,7 +2,7 @@
 {% block content %}
 {% include "_client_header.html" %}
 {% set active_count = talons|selectattr('state', 'equalto', 'active')|list|length %}
-{% set used_count = talons|selectattr('state', 'equalto', 'used')|list|length %}
+{% set used_count = talons|selectattr('status_label', 'equalto', 'Использован')|list|length %}
 {% set total_liters = talons|sum(attribute='liters') %}
 
 <div class="page-hero">
@@ -65,7 +65,7 @@
             <td>{{ t.valid_from.strftime("%d.%m.%Y") }}</td>
             <td>{{ t.valid_to.strftime("%d.%m.%Y") }}</td>
             <td>{{ t.code }}</td>
-            <td>{{ t.state }}</td>
+            <td>{{ t.status_label }}</td>
           </tr>
           {% else %}
           <tr><td colspan="9" class="empty-state">Нет талонов за выбранный период.</td></tr>

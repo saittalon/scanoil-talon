@@ -24,7 +24,7 @@
     <div>
       <div class="hero-kicker">Панель управления</div>
       <div class="hero-title">Клиенты, талоны и аналитика по сжиженному газу в одном окне</div>
-      <div class="hero-subtitle">Главная страница теперь работает как dashboard: сверху ключевые цифры, ниже — график активности и остатки по клиентам. Это намного удобнее старого ScanOil-стиля.</div>
+      
     </div>
     <div class="d-flex gap-2 flex-wrap">
       <a class="btn btn-brand" href="{{ url_for('clients.new_client') }}">+ Новый клиент</a>
@@ -94,8 +94,7 @@
           <div class="client-quickstats">
             <span class="pill-stat">Талоны: {{ c.talons|length }}</span>
             <span class="pill-stat">Остаток: {{ '%.0f'|format(client_liters.v) }} л</span>
-            <span class="pill-stat">Использовано: {{ '%.0f'|format(client_used.v) }} л</span>
-            <span class="pill-stat">Договоров: {{ c.contracts|length }}</span>
+                        <span class="pill-stat">Договоров: {{ c.contracts|length }}</span>
           </div>
         </div>
         <div class="quick-links">

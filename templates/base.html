@@ -23,7 +23,9 @@
     </div>
 
     <div class="sidebar-search">
-      <input class="form-control" type="text" value="" placeholder="Поиск по клиентам" disabled>
+      <form method="get" action="{{ url_for('clients.list_clients') }}">
+        <input class="form-control" type="text" name="q" value="{{ search_query or request.args.get('q', '') }}" placeholder="Поиск клиента">
+      </form>
     </div>
 
     <div class="sidebar-group-label">Навигация</div>
@@ -33,28 +35,12 @@
       <a class="sidebar-link" href="/clients/new">Новый клиент</a>
     </nav>
 
-    <div class="sidebar-group-label mt-4">Возможности</div>
-    <div class="sidebar-note-list">
-      <div class="sidebar-note">
-        <b>Реализация СУГ</b>
-        <span>Графики, суммы и литры по клиентам на одной панели.</span>
-      </div>
-      <div class="sidebar-note">
-        <b>Договоры и PDF</b>
-        <span>Основной договор и доп. соглашения разложены по отдельным блокам.</span>
-      </div>
-      <div class="sidebar-note">
-        <b>Остатки</b>
-        <span>Контроль лимитов и быстрые пополнения для газовых талонов.</span>
-      </div>
-    </div>
-
     <div class="sidebar-user mt-auto">
       <div class="user-chip">
         <div class="user-avatar">{{ (current_user.username[0] if current_user and current_user.username else 'A')|upper }}</div>
         <div>
           <div class="fw-semibold">{{ current_user.username }}</div>
-          <div class="brand-subtitle">{{ 'Администратор' if current_user.role == 'admin' else 'Оператор' }}</div>
+          <div class="brand-subtitle">{{ role_label(current_user.role) }}</div>
         </div>
       </div>
       <a class="btn btn-outline-secondary w-100 mt-3" href="/logout">Выйти</a>

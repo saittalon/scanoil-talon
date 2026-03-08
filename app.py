@@ -153,7 +153,7 @@ def create_app():
             }), 409
 
         talon.state = "used"
-        talon.used_at = datetime.utcnow()
+        talon.used_at = datetime.now()
         talon.used_agzs_id = sess.agzs_id
         talon.used_telegram_user_id = str(sess.telegram_user_id)
 
@@ -161,7 +161,7 @@ def create_app():
             talon_id=talon.id,
             agzs_id=sess.agzs_id,
             telegram_user_id=str(sess.telegram_user_id),
-            used_at=datetime.utcnow(),
+            used_at=datetime.now(),
             source="telegram_webapp"
         )
         db.session.add(red)

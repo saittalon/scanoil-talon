@@ -1,6 +1,5 @@
 import os
 import json
-import random
 from datetime import datetime, timedelta, date
 from io import BytesIO
 
@@ -16,7 +15,8 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from models import db, Client, Contract, Balance, Talon, ContractFile
-from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz
+from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz, kz_today
+from reports import dashboard_month_links
 from mail_utils import notify_event
 
 clients_bp = Blueprint("clients", __name__)
@@ -131,7 +131,7 @@ def list_clients():
             )
         )
     clients = query.order_by(Client.id.desc()).all()
-    return render_template("clients.html", clients=clients, is_admin=is_admin(), current_role=current_user.role, search_query=q)
+    return render_template("clients.html", clients=clients, is_admin=is_admin(), current_role=current_user.role, search_query=q, quick_report_links=dashboard_month_links())
 
 
 # ---------------- Новый клиент (ВАЖНО: endpoint=new_client) ----------------
@@ -482,7 +482,7 @@ def client_talons_add(client_id):
     valid_to = parse_date(request.form.get("valid_to") or "")
 
     if not valid_from:
-        valid_from = datetime.utcnow().date()
+        valid_from = kz_today()
     if not valid_to:
         valid_to = valid_from + timedelta(days=60)
 
@@ -507,13 +507,29 @@ def client_talons_add(client_id):
         bal.liters_left = left - need
         bal.updated_at = datetime.utcnow()
 
-    # генерация серий и кодов
-    existing = Talon.query.filter_by(client_id=client.id).count()
-    base_serial = existing + 1
+    # генерация серий и кодов по порядку
+    last_serial = (
+        db.session.query(Talon.serial_number)
+        .filter(Talon.client_id == client.id)
+        .order_by(Talon.id.desc())
+        .first()
+    )
+    try:
+        base_serial = int(last_serial[0]) + 1 if last_serial and str(last_serial[0]).isdigit() else 1
+    except Exception:
+        base_serial = Talon.query.filter_by(client_id=client.id).count() + 1
+
+    numeric_codes = []
+    for row in db.session.query(Talon.code).all():
+        try:
+            numeric_codes.append(int(str(row[0]).strip()))
+        except Exception:
+            continue
+    base_code = (max(numeric_codes) + 1) if numeric_codes else 1000000001
 
     for i in range(qty):
         serial_number = str(base_serial + i).zfill(5)
-        code = str(random.randint(1000000000, 9999999999))
+        code = str(base_code + i)
 
         t = Talon(
             client_id=client.id,
@@ -556,7 +572,7 @@ def talon_use(talon_id):
         return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
     t.state = "used"
-    t.used_at = datetime.utcnow()
+    t.used_at = datetime.now()
     t.used_by_user_id = current_user.id
     db.session.commit()
 

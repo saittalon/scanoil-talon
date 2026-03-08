@@ -19,7 +19,9 @@ def to_kz(dt):
     if not dt:
         return None
     if getattr(dt, "tzinfo", None) is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        # В проекте часто сохраняется naїve datetime уже в местном времени.
+        # Поэтому не сдвигаем его ещё раз на +5 часов, а считаем временем Казахстана.
+        return dt.replace(tzinfo=KZ_TZ)
     return dt.astimezone(KZ_TZ)
 
 

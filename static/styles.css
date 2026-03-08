@@ -190,3 +190,184 @@ h1, h2, h3, h4, h5 {
 .metric-value{color:#ffffff !important;text-shadow:0 1px 0 rgba(0,0,0,.25);}
 .metric-foot{color:#d8e4ff !important;}
 .side-item b{color:#ffffff !important;}
+/* ===== КНОПКИ ФИЛЬТРА ТАЛОНОВ ===== */
+
+.talon-filter-buttons{
+  display:flex;
+  gap:10px;
+  margin-top:16px;
+  margin-bottom:16px;
+  flex-wrap:wrap;
+}
+
+.talon-filter-buttons .btn{
+  min-height:40px;
+  padding:8px 16px;
+  border-radius:12px;
+  font-weight:700;
+  transition:all .15s ease;
+}
+
+/* активные */
+.talon-filter-buttons .btn-primary{
+  background:linear-gradient(90deg,#5f7cff,#7b61ff) !important;
+  border:none !important;
+  color:#fff !important;
+  box-shadow:0 8px 20px rgba(95,124,255,.35);
+}
+
+.talon-filter-buttons .btn-outline-primary{
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(120,150,255,.35);
+  color:#cfe0ff !important;
+}
+
+.talon-filter-buttons .btn-outline-primary:hover{
+  background:rgba(95,124,255,.15);
+  border-color:#6c8cff;
+  color:#ffffff !important;
+}
+
+/* использованные */
+
+.talon-filter-buttons .btn-secondary{
+  background:linear-gradient(90deg,#6c7da8,#7f92c4);
+  border:none;
+  color:#fff !important;
+}
+
+.talon-filter-buttons .btn-outline-secondary{
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(200,210,255,.25);
+  color:#dfe9ff !important;
+}
+
+.talon-filter-buttons .btn-outline-secondary:hover{
+  background:rgba(200,210,255,.1);
+  border-color:rgba(200,210,255,.45);
+}
+
+/* просроченные */
+
+.talon-filter-buttons .btn-warning{
+  background:linear-gradient(90deg,#ffbe62,#ffd37e);
+  border:none;
+  color:#2f2100 !important;
+}
+
+.talon-filter-buttons .btn-outline-warning{
+  background:rgba(255,190,98,.06);
+  border:1px solid rgba(255,190,98,.4);
+  color:#ffd98d !important;
+}
+
+.talon-filter-buttons .btn-outline-warning:hover{
+  background:rgba(255,190,98,.15);
+  border-color:#ffbe62;
+  color:#fff3d5 !important;
+}
+
+
+/* ===== ТАБЛИЦА ТАЛОНОВ ===== */
+
+.table td,
+.table th{
+  vertical-align:middle;
+  font-size:0.95rem;
+}
+
+.table thead th{
+  font-weight:700;
+  letter-spacing:.05em;
+}
+
+.table td span,
+.table td a{
+  color:#e9f1ff;
+}
+
+.table td .text-muted,
+.table td small{
+  color:#b8c8ff !important;
+}
+
+
+/* ===== BADGE СТАТУСОВ ===== */
+
+.badge{
+  font-size:.75rem;
+  padding:.55rem .7rem;
+}
+
+.text-bg-success{
+  background:rgba(34,199,123,.18) !important;
+  color:#b8ffd9 !important;
+}
+
+.text-bg-warning{
+  background:rgba(255,190,98,.2) !important;
+  color:#ffe7b5 !important;
+}
+
+.text-bg-danger{
+  background:rgba(255,108,141,.22) !important;
+  color:#ffd1dc !important;
+}
+
+.text-bg-secondary{
+  background:rgba(173,196,255,.18) !important;
+  color:#e5eeff !important;
+}
+
+
+/* ===== КАРТОЧКИ И ЦИФРЫ ===== */
+
+.metric-card,
+.info-card,
+.side-item{
+  background:linear-gradient(
+    180deg,
+    rgba(31,46,94,.94),
+    rgba(15,24,56,.96)
+  ) !important;
+}
+
+.metric-value,
+.info-value,
+.hero-title,
+.client-name{
+  color:#ffffff !important;
+  text-shadow:0 1px 0 rgba(0,0,0,.35);
+}
+
+
+/* ===== ЧИТАЕМОСТЬ ФОРМ ===== */
+
+label,
+.form-label,
+.form-text{
+  color:#dfe9ff !important;
+  font-weight:500;
+}
+
+input,
+textarea,
+select{
+  color:#ffffff !important;
+}
+
+input::placeholder,
+textarea::placeholder{
+  color:rgba(255,255,255,.55) !important;
+}
+
+.form-control,
+.form-select{
+  border:1px solid rgba(140,160,255,.35) !important;
+}
+
+.form-control:focus,
+.form-select:focus{
+  border-color:#6c8cff !important;
+  box-shadow:0 0 0 .15rem rgba(108,140,255,.25) !important;
+}

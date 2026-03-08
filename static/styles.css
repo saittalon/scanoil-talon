@@ -182,3 +182,11 @@ h1, h2, h3, h4, h5 {
 .table thead th {
   color: #c7d6ff !important;
 }
+
+
+/* readability fixes */
+.metric-card{background:linear-gradient(180deg, rgba(31,46,94,.88), rgba(18,28,64,.92)) !important;border-color:rgba(145,170,255,.18) !important;}
+.metric-label{color:#b9cdfd !important;}
+.metric-value{color:#ffffff !important;text-shadow:0 1px 0 rgba(0,0,0,.25);}
+.metric-foot{color:#d8e4ff !important;}
+.side-item b{color:#ffffff !important;}

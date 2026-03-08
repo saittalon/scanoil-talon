@@ -70,8 +70,9 @@
     <div class="section-title">Быстрые ссылки по отчётам</div>
     <div class="section-subtitle">Переходы к общей аналитике и месячным выборкам.</div>
     <div class="side-list">
-      <a class="side-item text-decoration-none" href="/reports/all?preset=jan"><b>Январь</b><div class="client-meta mt-1">Отчёт по всем клиентам за Январь</div></a>
-      <a class="side-item text-decoration-none" href="/reports/all?preset=feb"><b>Февраль</b><div class="client-meta mt-1">Отчёт по всем клиентам за Февраль</div></a>
+      {% for report_link in quick_report_links %}
+      <a class="side-item text-decoration-none" href="{{ report_link.href }}"><b>{{ report_link.title }}</b><div class="client-meta mt-1">{{ report_link.label }}</div></a>
+      {% endfor %}
       <a class="side-item text-decoration-none" href="/reports"><b>Полная аналитика</b><div class="client-meta mt-1">Сводка продаж, остатки и отчёты по клиенту</div></a>
     </div>
   </div>

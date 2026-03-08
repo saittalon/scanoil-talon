@@ -51,7 +51,7 @@
       <table class="table table-sm align-middle mb-0">
         <thead>
           <tr>
-            <th>№</th><th>Клиент</th><th>Держатель</th><th>Товар</th><th>Номинал</th><th>С</th><th>По</th><th>Талон</th><th>Статус</th>
+            <th>№</th><th>Клиент</th><th>Держатель</th><th>Товар</th><th>Номинал</th><th>С</th><th>По</th><th>Талон</th><th>Статус</th><th>Использован</th>
           </tr>
         </thead>
         <tbody>
@@ -65,10 +65,11 @@
             <td>{{ t.valid_from.strftime("%d.%m.%Y") }}</td>
             <td>{{ t.valid_to.strftime("%d.%m.%Y") }}</td>
             <td>{{ t.code }}</td>
-            <td>{{ t.status_label }}</td>
+            <td>{{ talon_status_label(t) }}</td>
+            <td>{{ format_kz(t.used_at) if t.used_at else "—" }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="9" class="empty-state">Нет талонов за выбранный период.</td></tr>
+          <tr><td colspan="10" class="empty-state">Нет талонов за выбранный период.</td></tr>
           {% endfor %}
         </tbody>
       </table>

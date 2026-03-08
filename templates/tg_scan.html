@@ -6,41 +6,69 @@
   <title>Сканер талонов</title>
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#0b1320;color:#fff}
-    .wrap{max-width:520px;margin:0 auto;padding:16px}
-    .card{background:#111c30;border-radius:18px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
-    h1{font-size:20px;margin:0 0 10px}
-    p{margin:0 0 12px;opacity:.9}
-    .video-wrap{position:relative;border-radius:16px;overflow:hidden;background:#000}
-    video{width:100%;height:auto;display:block}
+    .wrap{max-width:680px;margin:0 auto;padding:16px}
+    .card{background:#111c30;border-radius:22px;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+    h1{font-size:28px;line-height:1.2;margin:0 0 10px}
+    p{margin:0 0 14px;opacity:.95;font-size:18px;line-height:1.45}
+    .video-wrap{position:relative;border-radius:18px;overflow:hidden;background:#000;min-height:280px}
+    video{width:100%;height:auto;display:block;background:#000}
     .frame{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-    .box{width:70%;aspect-ratio:1/1;border:3px solid rgba(255,255,255,.85);border-radius:18px;box-shadow:0 0 0 9999px rgba(0,0,0,.25)}
-    .status{margin-top:12px;padding:10px 12px;border-radius:14px;background:#0f1a2e}
-    .btn{width:100%;margin-top:12px;padding:12px 14px;border-radius:14px;border:0;background:#24a148;color:#fff;font-weight:700;font-size:16px}
-    .btn:disabled{opacity:.6}
-    .muted{opacity:.8;font-size:13px;margin-top:8px}
+    .box{width:72%;aspect-ratio:1/1;border:4px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 0 0 9999px rgba(0,0,0,.25)}
+    .status{margin-top:14px;padding:14px 16px;border-radius:16px;background:#0f1a2e;font-size:18px;line-height:1.4}
+    .btn{width:100%;margin-top:14px;padding:18px 16px;border-radius:18px;border:0;background:#24a148;color:#fff;font-weight:800;font-size:28px;line-height:1.15;cursor:pointer}
+    .btn.secondary{background:#3b82f6;font-size:20px}
+    .btn.manual{background:#f59e0b;color:#111827;font-size:22px}
+    .btn:disabled{opacity:.6;cursor:default}
+    .muted{opacity:.9;font-size:16px;margin-top:10px;line-height:1.45}
     .err{color:#ffb4b4}
+    .hidden{display:none}
+    .manual-box{margin-top:14px;padding:14px;border-radius:16px;background:#0f1a2e}
+    .input{width:100%;box-sizing:border-box;padding:16px;border-radius:16px;border:2px solid #25314c;background:#0b1320;color:#fff;font-size:26px;font-weight:700;letter-spacing:1px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .row .btn{flex:1}
+    @media (max-width:480px){
+      h1{font-size:24px}
+      p,.status{font-size:17px}
+      .btn{font-size:24px}
+      .btn.manual{font-size:20px}
+      .input{font-size:22px}
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>📷 Сканирование талона</h1>
-      <p>Наведите камеру на QR‑код талона. Сканирование произойдёт автоматически.</p>
+      <h1>📷 СКАНИРОВАНИЕ ТАЛОНА</h1>
+      <p>Нажмите большую кнопку <b>«СКАНИРОВАТЬ»</b>. Если камера или QR не сработали, ниже можно ввести код вручную.</p>
 
-      <div class="video-wrap">
-        <video id="video" playsinline></video>
-        <div class="frame"><div class="box"></div></div>
+      <button id="startScan" class="btn">СКАНИРОВАТЬ</button>
+
+      <div id="scannerArea" class="hidden">
+        <div class="video-wrap" style="margin-top:14px;">
+          <video id="video" playsinline muted></video>
+          <div class="frame"><div class="box"></div></div>
+        </div>
       </div>
 
-      <div id="status" class="status">Подготовка камеры…</div>
+      <div id="status" class="status">Ожидание запуска сканера…</div>
       <div id="summary" class="muted" style="margin-top:10px;">Сканировано: <b id="count">0</b></div>
-      <div id="list" class="status" style="margin-top:10px;display:none;max-height:180px;overflow:auto;"></div>
-      <button id="finish" class="btn" style="background:#3b82f6;margin-top:12px;">Завершить</button>
-      <button id="retry" class="btn" style="display:none;">Повторить</button>
-      <div class="muted">Поддерживается пакетное сканирование: после успешного талона камера продолжит работать и можно сканировать следующий.</div>
+      <div id="list" class="status hidden" style="margin-top:10px;max-height:220px;overflow:auto;"></div>
+
+      <button id="showManual" class="btn manual">ВВЕСТИ КОД ВРУЧНУЮ</button>
+      <div id="manualBox" class="manual-box hidden">
+        <input id="manualCode" class="input" type="text" inputmode="numeric" placeholder="Введите код">
+        <div class="row">
+          <button id="sendManual" class="btn manual">ОТПРАВИТЬ КОД</button>
+        </div>
+      </div>
+
+      <button id="finish" class="btn secondary">ЗАВЕРШИТЬ</button>
+      <button id="retry" class="btn hidden">ПОВТОРИТЬ</button>
+      <div class="muted">Камера продолжит работать после успешного талона, поэтому можно сканировать подряд несколько QR-кодов.</div>
     </div>
   </div>
 
+<script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
 <script>
 const TOKEN = {{ token|tojson }};
 const statusEl = document.getElementById('status');
@@ -49,6 +77,12 @@ const retryBtn = document.getElementById('retry');
 const finishBtn = document.getElementById('finish');
 const listEl = document.getElementById('list');
 const countEl = document.getElementById('count');
+const startBtn = document.getElementById('startScan');
+const scannerArea = document.getElementById('scannerArea');
+const showManualBtn = document.getElementById('showManual');
+const manualBox = document.getElementById('manualBox');
+const manualCode = document.getElementById('manualCode');
+const sendManualBtn = document.getElementById('sendManual');
 
 function setStatus(text, isErr=false){
   statusEl.textContent = text;
@@ -59,15 +93,16 @@ let stream = null;
 let detector = null;
 let scanning = false;
 let inFlight = false;
-
-const seen = new Map(); // code -> ts
+let html5Scanner = null;
+let fallbackMode = false;
+const seen = new Map();
 let okCount = 0;
 
 function addToList(kind, text){
   const ts = new Date().toLocaleTimeString();
-  if(listEl.style.display === 'none') listEl.style.display = 'block';
+  listEl.classList.remove('hidden');
   const div = document.createElement('div');
-  div.style.padding = '8px 10px';
+  div.style.padding = '10px 12px';
   div.style.borderRadius = '12px';
   div.style.marginBottom = '8px';
   div.style.background = kind === 'ok' ? 'rgba(36,161,72,.15)' : 'rgba(255,180,180,.12)';
@@ -79,32 +114,13 @@ function bumpCount(){
   countEl.textContent = String(okCount);
 }
 
-async function startCamera(){
-  retryBtn.style.display = 'none';
-  try{
-    setStatus('Открываю камеру…');
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio:false });
-    video.srcObject = stream;
-    await video.play();
-
-    if ('BarcodeDetector' in window){
-      detector = new BarcodeDetector({formats:['qr_code']});
-      setStatus('Готово. Наведите на QR…');
-      scanning = true;
-      scanLoop();
-    } else {
-      setStatus('Ваше устройство не поддерживает быстрый сканер (BarcodeDetector). Откройте эту страницу в Chrome/Android.', true);
-      retryBtn.style.display = 'block';
-    }
-  } catch(e){
-    console.error(e);
-    setStatus('Не удалось открыть камеру. Разрешите доступ к камере и нажмите "Повторить".', true);
-    retryBtn.style.display = 'block';
-  }
-}
-
 function normalizeCode(raw){
-  let code = (raw || '').trim();
+  let code = String(raw || '').trim();
+  try{
+    const url = new URL(code);
+    const qp = url.searchParams.get('code') || url.searchParams.get('talon') || url.searchParams.get('id');
+    if(qp) code = qp;
+  }catch(e){}
   const m = code.match(/(\d{6,})/);
   if(m) code = m[1];
   return code;
@@ -113,43 +129,17 @@ function normalizeCode(raw){
 function cleanupSeen(){
   const now = Date.now();
   for(const [k,ts] of seen.entries()){
-    if(now - ts > 15000) seen.delete(k); // 15 сек
+    if(now - ts > 15000) seen.delete(k);
   }
 }
 
-async function scanLoop(){
-  if(!scanning) return;
-
-  cleanupSeen();
-
-  if(!inFlight){
-    try{
-      const codes = await detector.detect(video);
-      if(codes && codes.length){
-        const raw = (codes[0].rawValue || '').trim();
-        const code = normalizeCode(raw);
-
-        // дебаунс: не принимать один и тот же код каждые кадры
-        const now = Date.now();
-        const last = seen.get(code);
-        if(code && (!last || (now - last) > 2500)){
-          seen.set(code, now);
-          inFlight = true;
-          setStatus('Проверяю талон…');
-          await submitCode(code);
-          setStatus('Готово. Наведите на следующий QR…');
-          inFlight = false;
-        }
-      }
-    } catch(e){
-      console.error(e);
-    }
+async function submitCode(rawCode){
+  const code = normalizeCode(rawCode);
+  if(!code){
+    addToList('err', '❌ Не удалось распознать код.');
+    return;
   }
 
-  requestAnimationFrame(scanLoop);
-}
-
-async function submitCode(code){
   try{
     const res = await fetch('/tg/api/scan', {
       method:'POST',
@@ -162,8 +152,7 @@ async function submitCode(code){
       okCount += 1;
       bumpCount();
       addToList('ok', `✅ Принят: <b>${code}</b>${data.liters ? ' — ' + data.liters + ' л' : ''}${data.agzs ? ' — ' + data.agzs : ''}`);
-      // лёгкая вибрация (если доступно)
-      try{ navigator.vibrate && navigator.vibrate(50); }catch(e){}
+      try{ navigator.vibrate && navigator.vibrate(70); }catch(e){}
       return;
     }
 
@@ -171,25 +160,114 @@ async function submitCode(code){
       addToList('err', `⚠️ Уже использован: <b>${code}</b>${data.agzs ? ' — ' + data.agzs : ''}`);
     } else if(data.error === 'talon_not_found'){
       addToList('err', `❌ Не найден: <b>${code}</b>`);
+    } else if(data.error === 'expired'){
+      addToList('err', `❌ Срок талона истёк: <b>${code}</b>`);
     } else if(data.error === 'token_expired' || data.error === 'not_logged_in'){
-      addToList('err', `❌ Сессия истекла. Вернитесь в бот и нажмите "Сканировать" ещё раз.`);
+      addToList('err', '❌ Сессия истекла. Вернитесь в бот и нажмите «СКАНИРОВАТЬ» ещё раз.');
       scanning = false;
-      retryBtn.style.display = 'block';
+      retryBtn.classList.remove('hidden');
       setStatus('Сессия истекла.', true);
       return;
     } else if(data.error === 'missing_token_or_code'){
-      addToList('err', `❌ Пустой код.`);
+      addToList('err', '❌ Пустой код.');
     } else {
-      addToList('err', `❌ Ошибка при закрытии: <b>${code}</b>`);
+      addToList('err', `❌ Ошибка при обработке: <b>${code}</b>`);
     }
   } catch(e){
     console.error(e);
-    addToList('err', `❌ Ошибка сети при закрытии: <b>${code}</b>`);
+    addToList('err', `❌ Ошибка сети: <b>${code}</b>`);
   }
 }
 
-function stopCamera(){
+async function handleDetected(raw){
+  const code = normalizeCode(raw);
+  if(!code || inFlight) return;
+  const now = Date.now();
+  const last = seen.get(code);
+  if(last && (now - last) <= 2500) return;
+  seen.set(code, now);
+  inFlight = true;
+  setStatus('Проверяю талон…');
+  await submitCode(code);
+  if(scanning) setStatus('Готово. Наведите на следующий QR…');
+  inFlight = false;
+}
+
+async function scanLoop(){
+  if(!scanning || fallbackMode || !detector) return;
+  cleanupSeen();
+  if(!inFlight){
+    try{
+      const codes = await detector.detect(video);
+      if(codes && codes.length){
+        await handleDetected((codes[0].rawValue || '').trim());
+      }
+    } catch(e){
+      console.error(e);
+    }
+  }
+  requestAnimationFrame(scanLoop);
+}
+
+async function startBarcodeDetectorMode(){
+  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio:false });
+  video.srcObject = stream;
+  await video.play();
+  detector = new BarcodeDetector({formats:['qr_code']});
+  fallbackMode = false;
+  scanning = true;
+  setStatus('Готово. Наведите на QR…');
+  scanLoop();
+}
+
+async function startHtml5QrcodeFallback(){
+  fallbackMode = true;
+  setStatus('Запущен резервный сканер QR…');
+  if(!document.getElementById('reader')){
+    const reader = document.createElement('div');
+    reader.id = 'reader';
+    reader.style.marginTop = '14px';
+    scannerArea.appendChild(reader);
+  }
+  html5Scanner = new Html5Qrcode('reader');
+  await html5Scanner.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: { width: 240, height: 240 } },
+    async (decodedText) => { await handleDetected(decodedText); },
+    () => {}
+  );
+  scanning = true;
+  setStatus('Готово. Наведите на QR…');
+}
+
+async function startCamera(){
+  retryBtn.classList.add('hidden');
+  scannerArea.classList.remove('hidden');
+  try{
+    setStatus('Открываю камеру…');
+    if('BarcodeDetector' in window){
+      await startBarcodeDetectorMode();
+    } else if(window.Html5Qrcode){
+      await startHtml5QrcodeFallback();
+    } else {
+      throw new Error('scanner_not_supported');
+    }
+  } catch(e){
+    console.error(e);
+    setStatus('Не удалось открыть камеру. Разрешите доступ к камере или введите код вручную.', true);
+    retryBtn.classList.remove('hidden');
+  }
+}
+
+async function stopCamera(){
   scanning = false;
+  try{
+    if(html5Scanner){
+      await html5Scanner.stop();
+      await html5Scanner.clear();
+      html5Scanner = null;
+    }
+  }catch(e){ console.error(e); }
   try{
     if(stream){
       stream.getTracks().forEach(t=>t.stop());
@@ -198,17 +276,46 @@ function stopCamera(){
   }catch(e){}
 }
 
-retryBtn.addEventListener('click', ()=>{
-  stopCamera();
+startBtn.addEventListener('click', ()=>{
+  startBtn.disabled = true;
+  startCamera();
+});
+
+retryBtn.addEventListener('click', async ()=>{
+  await stopCamera();
   inFlight = false;
   startCamera();
 });
 
-finishBtn.addEventListener('click', ()=>{
-  stopCamera();
+showManualBtn.addEventListener('click', ()=>{
+  manualBox.classList.toggle('hidden');
+  if(!manualBox.classList.contains('hidden')) manualCode.focus();
+});
+
+sendManualBtn.addEventListener('click', async ()=>{
+  const code = normalizeCode(manualCode.value);
+  if(!code){
+    setStatus('Введите код цифрами.', true);
+    manualCode.focus();
+    return;
+  }
+  manualCode.value = '';
+  setStatus('Проверяю талон…');
+  await submitCode(code);
+  if(scanning || fallbackMode) setStatus('Готово. Наведите на следующий QR…');
+});
+
+manualCode.addEventListener('keydown', async (e)=>{
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    sendManualBtn.click();
+  }
+});
+
+finishBtn.addEventListener('click', async ()=>{
+  await stopCamera();
   const msg = okCount ? `✅ Готово. Закрыто талонов: ${okCount}` : 'Готово.';
   setStatus(msg);
-  // если открыто внутри Telegram WebApp — закрыть
   try{
     if(window.Telegram && Telegram.WebApp){
       Telegram.WebApp.close();
@@ -217,7 +324,6 @@ finishBtn.addEventListener('click', ()=>{
 });
 
 bumpCount();
-startCamera();
 </script>
 </body>
 </html>

@@ -10,7 +10,9 @@ ALLOWED_SITE_USERS = {"Erdaulet1997", "Gulbara2002", "Erlan2003"}
 
 @auth_bp.get("/login")
 def login_get():
-    return "LOGIN PAGE TEST
+    if current_user.is_authenticated:
+        return redirect(url_for("clients.list_clients"))
+    return render_template("login.html")
 
 
 @auth_bp.post("/login")

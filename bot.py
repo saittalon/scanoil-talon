@@ -1,8 +1,8 @@
 import os
 import re
-import asyncio
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
+from io import BytesIO
 
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import (
@@ -14,8 +14,14 @@ from telegram.ext import (
     filters,
 )
 
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
 from app import create_app
 from models import db, Talon, AGZS, BotSession, TalonRedemption, WebAppToken
+from helpers import kz_now, to_kz
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 WEBAPP_BASE_URL = os.getenv("WEBAPP_BASE_URL", "").strip().rstrip("/")
@@ -44,7 +50,6 @@ def _shift_keyboard():
 def _main_keyboard(scan_url: str | None = None):
     rows = []
 
-    # Делаем кнопку сканирования максимально заметной для пожилых пользователей
     if scan_url:
         rows.append([KeyboardButton("📷 СКАНИРОВАТЬ", web_app=WebAppInfo(url=scan_url))])
     else:
@@ -80,17 +85,23 @@ def _set_shift_open(context: ContextTypes.DEFAULT_TYPE, tg_user_id: int, value: 
     context.user_data[f"shift_open_{tg_user_id}"] = bool(value)
 
 
-def _make_scan_url(flask_app, tg_user_id: int) -> str | None:
-    """Creates a short-lived token that allows the Telegram WebApp page to redeem a talon.
+def _talon_price(talon: Talon) -> float:
+    contract = getattr(talon, "contract", None)
+    if contract and getattr(contract, "price_per_liter", None) is not None:
+        return float(contract.price_per_liter or 0)
+    return 0.0
 
-    NOTE: Telegram WebApp normally requires HTTPS to open inside Telegram.
-    For local testing, you can still open /tg/scan in a normal browser.
-    """
+
+def _format_money(value: float) -> str:
+    return f"{value:,.0f}".replace(",", " ")
+
+
+def _make_scan_url(flask_app, tg_user_id: int) -> str | None:
     if not WEBAPP_BASE_URL:
         return None
 
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    expires_at = kz_now() + timedelta(minutes=10)
 
     with flask_app.app_context():
         db.session.add(WebAppToken(
@@ -103,15 +114,151 @@ def _make_scan_url(flask_app, tg_user_id: int) -> str | None:
     return f"{WEBAPP_BASE_URL}/tg/scan?token={token}"
 
 
+def _build_day_report(flask_app, tg_user_id: int):
+    with flask_app.app_context():
+        sess = _get_session(tg_user_id)
+        if not sess:
+            return None
+
+        agzs = sess.agzs
+        today = kz_now().date()
+
+        redemptions = (
+            TalonRedemption.query
+            .filter_by(agzs_id=sess.agzs_id)
+            .order_by(TalonRedemption.used_at.asc())
+            .all()
+        )
+
+        items = []
+        total_liters = 0.0
+        total_amount = 0.0
+
+        for red in redemptions:
+            used_local = to_kz(red.used_at)
+            if not used_local or used_local.date() != today:
+                continue
+
+            talon = red.talon
+            if not talon:
+                continue
+
+            liters = float(talon.liters or 0)
+            amount = liters * _talon_price(talon)
+
+            total_liters += liters
+            total_amount += amount
+
+            items.append({
+                "serial": talon.serial_number or "без номера",
+                "code": talon.code or "—",
+                "liters": liters,
+                "amount": amount,
+                "time": used_local.strftime("%H:%M"),
+            })
+
+        return {
+            "date": today.strftime("%d.%m.%Y"),
+            "agzs_name": agzs.name if agzs else "АГЗС",
+            "count": len(items),
+            "total_liters": total_liters,
+            "total_amount": total_amount,
+            "items": items,
+        }
+
+
+def _build_report_text(report: dict) -> str:
+    lines = [
+        f"📊 Отчет за {report['date']}",
+        f"АГЗС: {report['agzs_name']}",
+        f"Использовано талонов: {report['count']}",
+        f"Всего литров: {report['total_liters']:.2f} л",
+        f"Общая сумма: {_format_money(report['total_amount'])} ₸",
+        "",
+    ]
+
+    if report["items"]:
+        lines.append("Талоны:")
+        for i, item in enumerate(report["items"], start=1):
+            lines.append(
+                f"{i}. №{item['serial']} | код {item['code']} | "
+                f"{item['liters']:.2f} л | {_format_money(item['amount'])} ₸ | {item['time']}"
+            )
+    else:
+        lines.append("Сегодня талонов не использовали")
+
+    return "\n".join(lines)
+
+
+def _build_report_pdf(report: dict) -> BytesIO:
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    _, height = A4
+
+    font_path = os.path.join("static", "fonts", "DejaVuSans.ttf")
+    bold_path = os.path.join("static", "fonts", "DejaVuSans-Bold.ttf")
+
+    if os.path.exists(font_path):
+        pdfmetrics.registerFont(TTFont("DejaVuSans", font_path))
+        base_font = "DejaVuSans"
+    else:
+        base_font = "Helvetica"
+
+    if os.path.exists(bold_path):
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
+        bold_font = "DejaVuSans-Bold"
+    else:
+        bold_font = "Helvetica-Bold"
+
+    y = height - 50
+
+    pdf.setFont(bold_font, 14)
+    pdf.drawString(40, y, f"Отчет по смене за {report['date']}")
+    y -= 25
+
+    pdf.setFont(base_font, 11)
+    pdf.drawString(40, y, f"АГЗС: {report['agzs_name']}")
+    y -= 18
+    pdf.drawString(40, y, f"Использовано талонов: {report['count']}")
+    y -= 18
+    pdf.drawString(40, y, f"Всего литров: {report['total_liters']:.2f} л")
+    y -= 18
+    pdf.drawString(40, y, f"Общая сумма: {_format_money(report['total_amount'])} ₸")
+    y -= 28
+
+    pdf.setFont(bold_font, 11)
+    pdf.drawString(40, y, "Список талонов")
+    y -= 20
+
+    pdf.setFont(base_font, 10)
+
+    if not report["items"]:
+        pdf.drawString(40, y, "Сегодня талонов не использовали")
+    else:
+        for i, item in enumerate(report["items"], start=1):
+            line = (
+                f"{i}. №{item['serial']} | код {item['code']} | "
+                f"{item['liters']:.2f} л | {_format_money(item['amount'])} ₸ | {item['time']}"
+            )
+            pdf.drawString(40, y, line)
+            y -= 16
+
+            if y < 50:
+                pdf.showPage()
+                pdf.setFont(base_font, 10)
+                y = height - 50
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
 
     with app.app_context():
         sess = _get_session(update.effective_user.id)
-        if sess:
-            agzs_name = sess.agzs.name if sess.agzs else "АГЗС"
-        else:
-            agzs_name = None
+        agzs_name = sess.agzs.name if sess and sess.agzs else None
 
     if agzs_name:
         scan_url = _make_scan_url(app, update.effective_user.id)
@@ -145,7 +292,10 @@ async def password_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with app.app_context():
         agzs = AGZS.query.filter_by(login=login, is_active=True).first()
         if not agzs or not agzs.check_password(pwd):
-            await update.message.reply_text("❌ Неверный логин или пароль", reply_markup=_auth_keyboard())
+            await update.message.reply_text(
+                "❌ Неверный логин или пароль",
+                reply_markup=_auth_keyboard()
+            )
             return ConversationHandler.END
 
         sess = BotSession.query.filter_by(
@@ -175,6 +325,7 @@ async def password_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
+
     with app.app_context():
         sess = _get_session(update.effective_user.id)
         if sess:
@@ -187,6 +338,7 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def enter_code_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
+
     with app.app_context():
         sess = _get_session(update.effective_user.id)
 
@@ -209,6 +361,7 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ENTER_CODE
 
     app = context.application.bot_data["flask_app"]
+
     with app.app_context():
         sess = _get_session(update.effective_user.id)
         if not sess:
@@ -219,24 +372,26 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not talon:
             await update.message.reply_text("❌ Талон не найден")
             return ConversationHandler.END
-        if talon.valid_to and talon.valid_to < datetime.utcnow().date():
+
+        if talon.valid_to and talon.valid_to < kz_now().date():
             talon.state = "expired"
             db.session.commit()
             await update.message.reply_text("❌ Срок действия талона истек")
             return ConversationHandler.END
+
         if talon.state == "used":
             await update.message.reply_text("❌ Талон уже использован")
             return ConversationHandler.END
 
         talon.state = "used"
-        talon.used_at = datetime.utcnow()
+        talon.used_at = kz_now()
         talon.used_agzs_id = sess.agzs_id
 
         db.session.add(TalonRedemption(
             talon_id=talon.id,
             agzs_id=sess.agzs_id,
             telegram_user_id=str(sess.telegram_user_id),
-            used_at=datetime.utcnow(),
+            used_at=kz_now(),
             source="telegram"
         ))
         db.session.commit()
@@ -247,8 +402,8 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a WebApp scanner link (useful for debugging / when keyboard button is not available)."""
     app = context.application.bot_data["flask_app"]
+
     with app.app_context():
         sess = _get_session(update.effective_user.id)
 
@@ -258,18 +413,13 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     scan_url = _make_scan_url(app, update.effective_user.id)
     if not scan_url:
-        await update.message.reply_text(
-            "⚠️ WEBAPP_BASE_URL не задан.\n"
-            "Для локального теста откройте в браузере: http://127.0.0.1:5000/tg/scan\n"
-            "А чтобы открыть сканер внутри Telegram — нужен HTTPS (например, через ngrok)."
-        )
+        await update.message.reply_text("⚠️ Не задан WEBAPP_BASE_URL")
         return
 
     await update.message.reply_text(
-        f"📷 Сканер (ссылка для копирования):\n{scan_url}",
+        f"📷 Сканер:\n{scan_url}",
         reply_markup=_main_keyboard(scan_url)
     )
-
 
 
 async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -279,10 +429,7 @@ async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with app.app_context():
         sess = _get_session(tg_user_id)
         if not sess:
-            await update.message.reply_text(
-                "Сначала войдите",
-                reply_markup=_auth_keyboard()
-            )
+            await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
             return
 
         agzs_name = sess.agzs.name if sess.agzs else "АГЗС"
@@ -296,9 +443,48 @@ async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    app = context.application.bot_data["flask_app"]
+    tg_user_id = update.effective_user.id
+
+    with app.app_context():
+        sess = _get_session(tg_user_id)
+
+    if not sess:
+        await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
+        return
+
+    if not _shift_open(context, tg_user_id):
+        await update.message.reply_text("Смена уже закрыта", reply_markup=_shift_keyboard())
+        return
+
+    report = _build_day_report(app, tg_user_id)
+    if not report:
+        await update.message.reply_text("Не удалось собрать отчет", reply_markup=_shift_keyboard())
+        return
+
+    text = _build_report_text(report)
+    pdf_buffer = _build_report_pdf(report)
+
+    await update.message.reply_text(text)
+    await update.message.reply_document(
+        document=pdf_buffer,
+        filename=f"shift_report_{report['date'].replace('.', '_')}.pdf",
+        caption=f"Отчет по смене: {report['agzs_name']}"
+    )
+
+    _set_shift_open(context, tg_user_id, False)
+
+    await update.message.reply_text(
+        "🔴 Смена закрыта",
+        reply_markup=_shift_keyboard()
+    )
+
+
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
     tg_user_id = update.effective_user.id
+
     with app.app_context():
         sess = _get_session(tg_user_id)
 
@@ -316,6 +502,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def scan_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await scan(update, context)
+
 
 def main():
     if not BOT_TOKEN:
@@ -348,6 +535,7 @@ def main():
 
     application.add_handler(MessageHandler(filters.Regex(r"^🟢 ОТКРЫТЬ СМЕНУ$"), open_shift))
     application.add_handler(MessageHandler(filters.Regex(r"^📋 МЕНЮ$"), show_menu))
+    application.add_handler(MessageHandler(filters.Regex(r"^🔴 ЗАКРЫТЬ СМЕНУ$"), close_shift))
     application.add_handler(MessageHandler(filters.Regex(r"^📷 СКАНИРОВАТЬ$"), scan_button))
     application.add_handler(MessageHandler(filters.Regex("^🚪 Выйти$"), logout))
 
@@ -356,37 +544,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    app = context.application.bot_data["flask_app"]
-    tg_user_id = update.effective_user.id
-
-    with app.app_context():
-        sess = _get_session(tg_user_id)
-        if not sess:
-            await update.message.reply_text("Сначала войдите")
-            return
-
-        agzs = sess.agzs
-
-        today = datetime.utcnow().date()
-
-        redemptions = TalonRedemption.query.filter_by(agzs_id=sess.agzs_id).all()
-
-        items=[]
-        for r in redemptions:
-            if r.used_at and r.used_at.date()==today and r.talon:
-                items.append(r)
-
-        total=len(items)
-        liters=sum(float(i.talon.liters or 0) for i in items)
-        amount=sum(float(i.talon.liters or 0)*(i.talon.contract.price_per_liter if i.talon.contract else 0) for i in items)
-
-        text=f"📊 Отчет за {today}\nАГЗС: {agzs.name if agzs else ''}\nИспользовано талонов: {total}\nВсего литров: {liters}\nСумма: {amount} ₸\n"
-
-        for i,r in enumerate(items,1):
-            text+=f"\n{i}. №{r.talon.serial_number} | {r.talon.liters}л"
-
-    context.user_data[f"shift_open_{tg_user_id}"]=False
-    await update.message.reply_text(text)

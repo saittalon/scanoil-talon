@@ -22,19 +22,18 @@ from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 
 
-ALLOWED_KEEP_USERS = {"director", "zamdirector", "executor"}
+ALLOWED_SITE_USERS = {
+    "Erdaulet1997": ("123456Muraz", "director"),
+    "Gulbara2002": ("123456Muraz", "zamdirector"),
+    "Erlan2003": ("123456Muraz", "executor"),
+}
 
 
 def _ensure_only_allowed_users():
-    allowed_specs = {
-        "director": ("director123", "director"),
-        "zamdirector": ("zamdirector123", "zamdirector"),
-        "executor": ("executor123", "executor"),
-    }
-
+    allowed_usernames = set(ALLOWED_SITE_USERS.keys())
     changed = False
 
-    for username, (password, role) in allowed_specs.items():
+    for username, (password, role) in ALLOWED_SITE_USERS.items():
         user = User.query.filter_by(username=username).first()
         if not user:
             user = User(username=username, role=role)
@@ -45,10 +44,12 @@ def _ensure_only_allowed_users():
             if user.role != role:
                 user.role = role
                 changed = True
+            user.set_password(password)
+            changed = True
 
     db.session.flush()
 
-    extra_users = User.query.filter(~User.username.in_(ALLOWED_KEEP_USERS)).all()
+    extra_users = User.query.filter(~User.username.in_(allowed_usernames)).all()
     if extra_users:
         extra_ids = [u.id for u in extra_users]
 
@@ -107,7 +108,6 @@ def create_app():
                 "executor": "Исполнитель",
             }
             return labels.get(role, role)
-
         return dict(role_label=role_label)
 
     @app.context_processor
@@ -155,7 +155,7 @@ def create_app():
 
     @app.post("/admin/send-daily-report")
     @login_required
-    @require_roles("director", "deputy_director", "zamdirector")
+    @require_roles("director", "zamdirector", "deputy_director")
     def admin_send_daily_report():
         ok = send_daily_report()
         return jsonify({"ok": bool(ok)})
@@ -179,7 +179,6 @@ def create_app():
             return jsonify({"ok": False, "error": "token_expired"}), 401
 
         expires_at = t.expires_at
-
         if expires_at is None:
             return jsonify({"ok": False, "error": "token_expired"}), 401
 
@@ -201,7 +200,6 @@ def create_app():
             return jsonify({"ok": False, "error": "not_logged_in"}), 401
 
         talon = Talon.query.filter_by(code=code).first()
-
         if talon is None:
             return jsonify({"ok": False, "error": "talon_not_found"}), 404
 

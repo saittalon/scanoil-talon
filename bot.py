@@ -33,6 +33,8 @@ def _auth_keyboard():
     return ReplyKeyboardMarkup(
         [[KeyboardButton("🔐 Войти")]],
         resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
     )
 
 
@@ -41,9 +43,11 @@ def _shift_keyboard():
         [
             [KeyboardButton("🟢 ОТКРЫТЬ СМЕНУ")],
             [KeyboardButton("🔴 ЗАКРЫТЬ СМЕНУ")],
-            [KeyboardButton("🚪 Выйти")],
+            [KeyboardButton("🚪 ВЫЙТИ")],
         ],
         resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
     )
 
 
@@ -55,12 +59,17 @@ def _main_keyboard(scan_url: str | None = None):
     else:
         rows.append([KeyboardButton("📷 СКАНИРОВАТЬ")])
 
-    rows.append([KeyboardButton("⌨️ ВВЕСТИ КОД ВРУЧНУЮ")])
+    rows.append([KeyboardButton("⌨️ ВВЕСТИ КОД")])
     rows.append([KeyboardButton("📋 МЕНЮ")])
     rows.append([KeyboardButton("🔴 ЗАКРЫТЬ СМЕНУ")])
-    rows.append([KeyboardButton("🚪 Выйти")])
+    rows.append([KeyboardButton("🚪 ВЫЙТИ")])
 
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
+    )
 
 
 def _only_digits(text):
@@ -268,7 +277,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            "👋 Добро пожаловать\nНажмите 🔐 Войти",
+            "👋 Добро пожаловать",
             reply_markup=_auth_keyboard()
         )
 
@@ -317,7 +326,7 @@ async def password_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     _set_shift_open(context, update.effective_user.id, False)
     await update.message.reply_text(
-        "✅ Вход выполнен\nТеперь нажмите 🟢 ОТКРЫТЬ СМЕНУ",
+        "✅ Вход выполнен",
         reply_markup=_shift_keyboard()
     )
     return ConversationHandler.END
@@ -438,7 +447,7 @@ async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scan_url = _make_scan_url(app, tg_user_id)
 
     await update.message.reply_text(
-        f"🟢 Смена открыта: {agzs_name}\nВыберите действие в меню.",
+        f"🟢 Смена открыта: {agzs_name}",
         reply_markup=_main_keyboard(scan_url)
     )
 
@@ -517,7 +526,7 @@ def main():
     application.add_handler(CommandHandler("scan", scan))
 
     application.add_handler(ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^🔐 Войти$"), login_begin)],
+        entry_points=[MessageHandler(filters.Regex(r"^🔐 Войти$"), login_begin)],
         states={
             LOGIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, login_got)],
             PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, password_got)],
@@ -526,7 +535,7 @@ def main():
     ))
 
     application.add_handler(ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex(r"^⌨️ ВВЕСТИ КОД ВРУЧНУЮ$"), enter_code_begin)],
+        entry_points=[MessageHandler(filters.Regex(r"^⌨️ ВВЕСТИ КОД$"), enter_code_begin)],
         states={
             ENTER_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_code_got)],
         },
@@ -537,7 +546,7 @@ def main():
     application.add_handler(MessageHandler(filters.Regex(r"^📋 МЕНЮ$"), show_menu))
     application.add_handler(MessageHandler(filters.Regex(r"^🔴 ЗАКРЫТЬ СМЕНУ$"), close_shift))
     application.add_handler(MessageHandler(filters.Regex(r"^📷 СКАНИРОВАТЬ$"), scan_button))
-    application.add_handler(MessageHandler(filters.Regex("^🚪 Выйти$"), logout))
+    application.add_handler(MessageHandler(filters.Regex(r"^🚪 ВЫЙТИ$"), logout))
 
     application.run_polling()
 

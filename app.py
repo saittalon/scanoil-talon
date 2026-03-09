@@ -1,10 +1,8 @@
 import os
 from datetime import datetime, timezone
-from sqlalchemy import inspect, text
 
 from flask import (
-    Flask, redirect, url_for, request, jsonify, render_template,
-    abort
+    Flask, redirect, url_for, request, jsonify, render_template, abort
 )
 from flask_login import LoginManager, login_required
 from supabase import create_client
@@ -16,7 +14,6 @@ from models import (
     BotSession, TalonRedemption, WebAppToken,
     ContractFile
 )
-
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
@@ -24,9 +21,8 @@ from helpers import require_roles, talon_status_label, format_kz, kz_now
 from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 
+
 ALLOWED_KEEP_USERS = {"director", "zamdirector", "executor"}
-
-
 
 
 def _ensure_only_allowed_users():
@@ -46,9 +42,8 @@ def _ensure_only_allowed_users():
             db.session.add(user)
             changed = True
         else:
-            desired_role = role
-            if user.role != desired_role:
-                user.role = desired_role
+            if user.role != role:
+                user.role = role
                 changed = True
 
     db.session.flush()
@@ -56,15 +51,30 @@ def _ensure_only_allowed_users():
     extra_users = User.query.filter(~User.username.in_(ALLOWED_KEEP_USERS)).all()
     if extra_users:
         extra_ids = [u.id for u in extra_users]
-        Talon.query.filter(Talon.used_by_user_id.in_(extra_ids)).update({Talon.used_by_user_id: None}, synchronize_session=False)
-        ContractFile.query.filter(ContractFile.uploaded_by_user_id.in_(extra_ids)).update({ContractFile.uploaded_by_user_id: None}, synchronize_session=False)
-        ContractFile.query.filter(ContractFile.approved_by_user_id.in_(extra_ids)).update({ContractFile.approved_by_user_id: None}, synchronize_session=False)
+
+        Talon.query.filter(Talon.used_by_user_id.in_(extra_ids)).update(
+            {Talon.used_by_user_id: None},
+            synchronize_session=False
+        )
+
+        ContractFile.query.filter(ContractFile.uploaded_by_user_id.in_(extra_ids)).update(
+            {ContractFile.uploaded_by_user_id: None},
+            synchronize_session=False
+        )
+
+        ContractFile.query.filter(ContractFile.approved_by_user_id.in_(extra_ids)).update(
+            {ContractFile.approved_by_user_id: None},
+            synchronize_session=False
+        )
+
         for user in extra_users:
             db.session.delete(user)
+
         changed = True
 
     if changed:
         db.session.commit()
+
 
 def create_app():
     app = Flask(__name__)
@@ -73,6 +83,7 @@ def create_app():
     db.init_app(app)
 
     with app.app_context():
+        db.create_all()
         _ensure_only_allowed_users()
 
     login_manager = LoginManager()
@@ -96,13 +107,14 @@ def create_app():
                 "executor": "Исполнитель",
             }
             return labels.get(role, role)
+
         return dict(role_label=role_label)
 
     @app.context_processor
     def inject_template_helpers():
         return {
             "talon_status_label": talon_status_label,
-            "format_kz": format_kz
+            "format_kz": format_kz,
         }
 
     app.register_blueprint(auth_bp)
@@ -143,7 +155,7 @@ def create_app():
 
     @app.post("/admin/send-daily-report")
     @login_required
-    @require_roles("director", "deputy_director")
+    @require_roles("director", "deputy_director", "zamdirector")
     def admin_send_daily_report():
         ok = send_daily_report()
         return jsonify({"ok": bool(ok)})
@@ -167,13 +179,18 @@ def create_app():
             return jsonify({"ok": False, "error": "token_expired"}), 401
 
         expires_at = t.expires_at
-        if getattr(expires_at, "tzinfo", None) is not None:
-            expires_at_utc = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
-        else:
-            expires_at_utc = expires_at
 
-        if expires_at_utc < datetime.utcnow():
+        if expires_at is None:
             return jsonify({"ok": False, "error": "token_expired"}), 401
+
+        if getattr(expires_at, "tzinfo", None) is not None:
+            now_utc = datetime.now(timezone.utc)
+            if expires_at.astimezone(timezone.utc) < now_utc:
+                return jsonify({"ok": False, "error": "token_expired"}), 401
+        else:
+            now_naive_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            if expires_at < now_naive_utc:
+                return jsonify({"ok": False, "error": "token_expired"}), 401
 
         sess = BotSession.query.filter_by(
             telegram_user_id=t.telegram_user_id,
@@ -204,8 +221,8 @@ def create_app():
             return jsonify({
                 "ok": False,
                 "error": "already_used",
-                "used_at": last.used_at.isoformat() if last else None,
-                "agzs": last.agzs.name if last and last.agzs else None
+                "used_at": last.used_at.isoformat() if last and last.used_at else None,
+                "agzs": last.agzs.name if last and last.agzs else None,
             }), 409
 
         talon.state = "used"
@@ -218,7 +235,7 @@ def create_app():
             agzs_id=sess.agzs_id,
             telegram_user_id=str(sess.telegram_user_id),
             used_at=kz_now(),
-            source="telegram_webapp"
+            source="telegram_webapp",
         )
 
         db.session.add(red)
@@ -231,7 +248,7 @@ def create_app():
             "serial": getattr(talon, "serial_number", None),
             "valid_from": str(getattr(talon, "valid_from", "")),
             "valid_to": str(getattr(talon, "valid_to", "")),
-            "agzs": sess.agzs.name if sess.agzs else None
+            "agzs": sess.agzs.name if sess.agzs else None,
         })
 
     return app

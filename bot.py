@@ -34,6 +34,7 @@ def _shift_keyboard():
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("🟢 ОТКРЫТЬ СМЕНУ")],
+            [KeyboardButton("🔴 ЗАКРЫТЬ СМЕНУ")],
             [KeyboardButton("🚪 Выйти")],
         ],
         resize_keyboard=True,
@@ -51,6 +52,7 @@ def _main_keyboard(scan_url: str | None = None):
 
     rows.append([KeyboardButton("⌨️ ВВЕСТИ КОД ВРУЧНУЮ")])
     rows.append([KeyboardButton("📋 МЕНЮ")])
+    rows.append([KeyboardButton("🔴 ЗАКРЫТЬ СМЕНУ")])
     rows.append([KeyboardButton("🚪 Выйти")])
 
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
@@ -354,3 +356,37 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    app = context.application.bot_data["flask_app"]
+    tg_user_id = update.effective_user.id
+
+    with app.app_context():
+        sess = _get_session(tg_user_id)
+        if not sess:
+            await update.message.reply_text("Сначала войдите")
+            return
+
+        agzs = sess.agzs
+
+        today = datetime.utcnow().date()
+
+        redemptions = TalonRedemption.query.filter_by(agzs_id=sess.agzs_id).all()
+
+        items=[]
+        for r in redemptions:
+            if r.used_at and r.used_at.date()==today and r.talon:
+                items.append(r)
+
+        total=len(items)
+        liters=sum(float(i.talon.liters or 0) for i in items)
+        amount=sum(float(i.talon.liters or 0)*(i.talon.contract.price_per_liter if i.talon.contract else 0) for i in items)
+
+        text=f"📊 Отчет за {today}\nАГЗС: {agzs.name if agzs else ''}\nИспользовано талонов: {total}\nВсего литров: {liters}\nСумма: {amount} ₸\n"
+
+        for i,r in enumerate(items,1):
+            text+=f"\n{i}. №{r.talon.serial_number} | {r.talon.liters}л"
+
+    context.user_data[f"shift_open_{tg_user_id}"]=False
+    await update.message.reply_text(text)

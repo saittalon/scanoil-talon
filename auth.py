@@ -2,6 +2,9 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user
 from models import User
 
+ALLOWED_SITE_USERS = {"director", "zamdirector", "executor"}
+ALLOWED_SITE_ROLES = {"director", "deputy_director", "zamdirector", "executor"}
+
 auth_bp = Blueprint('auth', __name__)
 
 
@@ -35,6 +38,10 @@ def login_post():
     user = User.query.filter_by(username=username).first()
     if not user or not user.check_password(password):
         flash('Неверный логин или пароль', 'danger')
+        return redirect(url_for('auth.login_get'))
+
+    if user.username not in ALLOWED_SITE_USERS and user.role not in ALLOWED_SITE_ROLES:
+        flash('Доступ разрешен только директору, замдиректору и исполнителю', 'danger')
         return redirect(url_for('auth.login_get'))
 
     login_user(user)

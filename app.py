@@ -24,12 +24,56 @@ from helpers import require_roles, talon_status_label, format_kz, kz_now
 from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 
+ALLOWED_KEEP_USERS = {"director", "zamdirector", "executor"}
+
+
+
+
+def _ensure_only_allowed_users():
+    allowed_specs = {
+        "director": ("director123", "director"),
+        "zamdirector": ("zamdirector123", "zamdirector"),
+        "executor": ("executor123", "executor"),
+    }
+
+    changed = False
+
+    for username, (password, role) in allowed_specs.items():
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            user = User(username=username, role=role)
+            user.set_password(password)
+            db.session.add(user)
+            changed = True
+        else:
+            desired_role = role
+            if user.role != desired_role:
+                user.role = desired_role
+                changed = True
+
+    db.session.flush()
+
+    extra_users = User.query.filter(~User.username.in_(ALLOWED_KEEP_USERS)).all()
+    if extra_users:
+        extra_ids = [u.id for u in extra_users]
+        Talon.query.filter(Talon.used_by_user_id.in_(extra_ids)).update({Talon.used_by_user_id: None}, synchronize_session=False)
+        ContractFile.query.filter(ContractFile.uploaded_by_user_id.in_(extra_ids)).update({ContractFile.uploaded_by_user_id: None}, synchronize_session=False)
+        ContractFile.query.filter(ContractFile.approved_by_user_id.in_(extra_ids)).update({ContractFile.approved_by_user_id: None}, synchronize_session=False)
+        for user in extra_users:
+            db.session.delete(user)
+        changed = True
+
+    if changed:
+        db.session.commit()
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
     db.init_app(app)
+
+    with app.app_context():
+        _ensure_only_allowed_users()
 
     login_manager = LoginManager()
     login_manager.login_view = "auth.login_get"

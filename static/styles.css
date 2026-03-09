@@ -371,3 +371,26 @@ textarea::placeholder{
   border-color:#6c8cff !important;
   box-shadow:0 0 0 .15rem rgba(108,140,255,.25) !important;
 }
+/* ===== FIX LOGIN INPUT TEXT ===== */
+
+.login-box input,
+.login-box textarea,
+.login-box select {
+  color:#111 !important;
+  background:#ffffff !important;
+}
+
+.login-box input::placeholder {
+  color:#888 !important;
+}
+
+/* рамка поля */
+.login-box input {
+  border:1px solid #d1d5db !important;
+}
+
+/* фокус */
+.login-box input:focus {
+  border-color:#4f7cff !important;
+  box-shadow:0 0 0 3px rgba(79,124,255,0.15) !important;
+}

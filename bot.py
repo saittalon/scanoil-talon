@@ -432,62 +432,107 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    app = context.application.bot_data["flask_app"]
-    tg_user_id = update.effective_user.id
+    tg_id = str(update.effective_user.id)
 
-    with app.app_context():
-        sess = _get_session(tg_user_id)
-        if not sess:
-            await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
-            return
+    sess = BotSession.query.filter_by(
+        telegram_user_id=tg_id,
+        is_active=True
+    ).first()
 
-        agzs_name = sess.agzs.name if sess.agzs else "АГЗС"
+    if not sess:
+        await update.message.reply_text("Сначала войдите.")
+        return
 
-    _set_shift_open(context, tg_user_id, True)
-    scan_url = _make_scan_url(app, tg_user_id)
+    shift = Shift.query.filter_by(
+        agzs_id=sess.agzs_id,
+        is_closed=False
+    ).first()
 
-    await update.message.reply_text(
-        f"🟢 Смена открыта: {agzs_name}",
-        reply_markup=_main_keyboard(scan_url)
+    if shift:
+        await update.message.reply_text("⚠️ Смена уже открыта")
+        return
+
+    shift = Shift(
+        agzs_id=sess.agzs_id,
+        opened_at=kz_now()
     )
+
+    db.session.add(shift)
+    db.session.commit()
+
+    await update.message.reply_text(f"🟢 Смена открыта: {sess.agzs.name}")
 
 
 async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    app = context.application.bot_data["flask_app"]
-    tg_user_id = update.effective_user.id
+    tg_id = str(update.effective_user.id)
 
-    with app.app_context():
-        sess = _get_session(tg_user_id)
+    sess = BotSession.query.filter_by(
+        telegram_user_id=tg_id,
+        is_active=True
+    ).first()
 
     if not sess:
-        await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
+        await update.message.reply_text("Сначала войдите.")
         return
 
-    if not _shift_open(context, tg_user_id):
-        await update.message.reply_text("Смена уже закрыта", reply_markup=_shift_keyboard())
+    shift = Shift.query.filter_by(
+        agzs_id=sess.agzs_id,
+        is_closed=False
+    ).first()
+
+    if not shift:
+        await update.message.reply_text("Нет открытой смены.")
         return
 
-    report = _build_day_report(app, tg_user_id)
-    if not report:
-        await update.message.reply_text("Не удалось собрать отчет", reply_markup=_shift_keyboard())
-        return
+    shift.closed_at = kz_now()
+    shift.is_closed = True
 
-    text = _build_report_text(report)
-    pdf_buffer = _build_report_pdf(report)
-
-    await update.message.reply_text(text)
-    await update.message.reply_document(
-        document=pdf_buffer,
-        filename=f"shift_report_{report['date'].replace('.', '_')}.pdf",
-        caption=f"Отчет по смене: {report['agzs_name']}"
+    redemptions = (
+        TalonRedemption.query
+        .filter(
+            TalonRedemption.agzs_id == sess.agzs_id,
+            TalonRedemption.used_at >= shift.opened_at,
+            TalonRedemption.used_at <= shift.closed_at
+        )
+        .order_by(TalonRedemption.used_at.asc())
+        .all()
     )
 
-    _set_shift_open(context, tg_user_id, False)
+    total_liters = 0
+    talon_lines = []
 
-    await update.message.reply_text(
-        "🔴 Смена закрыта",
-        reply_markup=_shift_keyboard()
+    for i, r in enumerate(redemptions, start=1):
+        talon = r.talon
+        liters = talon.liters or 0
+        total_liters += liters
+
+        time = to_kz(r.used_at).strftime("%H:%M")
+
+        talon_lines.append(
+            f"{i}. №{talon.serial_number} | код {talon.code} | {liters:.2f} л | {time}"
+        )
+
+    shift.total_talons = len(redemptions)
+    shift.total_liters = total_liters
+
+    report = (
+        f"📊 Отчет по смене\n"
+        f"АГЗС: {sess.agzs.name}\n"
+        f"Использовано талонов: {len(redemptions)}\n"
+        f"Всего литров: {total_liters:.2f} л\n\n"
     )
+
+    if talon_lines:
+        report += "Талоны:\n" + "\n".join(talon_lines)
+    else:
+        report += "Сегодня талоны не использовали"
+
+    shift.report_text = report
+
+    db.session.commit()
+
+    await update.message.reply_text(report)
+    await update.message.reply_text("🔴 Смена закрыта")
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):

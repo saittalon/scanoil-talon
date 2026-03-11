@@ -463,8 +463,11 @@ async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         agzs_name = sess.agzs.name
 
+    scan_url = _make_scan_url(app, update.effective_user.id)
+
     await update.message.reply_text(
-        f"🟢 Смена открыта: {agzs_name}"
+        f"🟢 Смена открыта: {agzs_name}",
+        reply_markup=_main_keyboard(scan_url)
     )
 
 

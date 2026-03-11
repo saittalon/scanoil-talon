@@ -13,7 +13,7 @@
     .video-wrap{position:relative;border-radius:18px;overflow:hidden;background:#000;min-height:280px}
     video{width:100%;height:auto;display:block;background:#000}
     .frame{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-    .box{width:72%;aspect-ratio:1/1;border:4px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 0 0 9999px rgba(0,0,0,.25);transition:border-color .2s ease}
+    .box{width:72%;aspect-ratio:1/1;border:4px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 0 0 9999px rgba(0,0,0,.25)}
     .status{margin-top:14px;padding:14px 16px;border-radius:16px;background:#0f1a2e;font-size:18px;line-height:1.4}
     .btn{width:100%;margin-top:14px;padding:18px 16px;border-radius:18px;border:0;background:#24a148;color:#fff;font-weight:800;font-size:28px;line-height:1.15;cursor:pointer}
     .btn.secondary{background:#3b82f6;font-size:20px}
@@ -69,12 +69,6 @@
   </div>
 
 <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
-
-<!-- 🔔 звук -->
-<audio id="scanSound">
-  <source src="/static/scan.mp3" type="audio/mpeg">
-</audio>
-
 <script>
 const TOKEN = {{ token|tojson }};
 const statusEl = document.getElementById('status');
@@ -89,31 +83,6 @@ const showManualBtn = document.getElementById('showManual');
 const manualBox = document.getElementById('manualBox');
 const manualCode = document.getElementById('manualCode');
 const sendManualBtn = document.getElementById('sendManual');
-
-function playSuccess(){
-  const sound = document.getElementById("scanSound");
-  if(sound){
-    sound.currentTime = 0;
-    sound.play().catch(()=>{});
-  }
-  if(navigator.vibrate){ navigator.vibrate(120); }
-
-  const box = document.querySelector('.box');
-  if(box){
-    box.style.borderColor = '#24a148';
-    setTimeout(()=> box.style.borderColor='rgba(255,255,255,.9)',300);
-  }
-}
-
-function playError(){
-  if(navigator.vibrate){ navigator.vibrate([80,50,80]); }
-
-  const box = document.querySelector('.box');
-  if(box){
-    box.style.borderColor = '#ff4d4d';
-    setTimeout(()=> box.style.borderColor='rgba(255,255,255,.9)',400);
-  }
-}
 
 function setStatus(text, isErr=false){
   statusEl.textContent = text;
@@ -157,11 +126,17 @@ function normalizeCode(raw){
   return code;
 }
 
+function cleanupSeen(){
+  const now = Date.now();
+  for(const [k,ts] of seen.entries()){
+    if(now - ts > 15000) seen.delete(k);
+  }
+}
+
 async function submitCode(rawCode){
   const code = normalizeCode(rawCode);
   if(!code){
     addToList('err', '❌ Не удалось распознать код.');
-    playError();
     return;
   }
 
@@ -171,31 +146,184 @@ async function submitCode(rawCode){
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({token: TOKEN, code})
     });
-
     const data = await res.json().catch(()=>({ok:false,error:'bad_json'}));
 
     if(res.ok && data.ok){
       okCount += 1;
       bumpCount();
-
       addToList('ok', `✅ Принят: <b>${code}</b>${data.liters ? ' — ' + data.liters + ' л' : ''}${data.agzs ? ' — ' + data.agzs : ''}`);
-      playSuccess();
+      try{ navigator.vibrate && navigator.vibrate(70); }catch(e){}
       return;
     }
 
     if(data.error === 'already_used'){
-      addToList('err', `⚠️ Уже использован: <b>${code}</b>`);
-    }else{
-      addToList('err', `❌ Ошибка: <b>${code}</b>`);
+      addToList('err', `⚠️ Уже использован: <b>${code}</b>${data.agzs ? ' — ' + data.agzs : ''}`);
+    } else if(data.error === 'talon_not_found'){
+      addToList('err', `❌ Не найден: <b>${code}</b>`);
+    } else if(data.error === 'expired'){
+      addToList('err', `❌ Срок талона истёк: <b>${code}</b>`);
+    } else if(data.error === 'token_expired' || data.error === 'not_logged_in'){
+      addToList('err', '❌ Сессия истекла. Вернитесь в бот и нажмите «СКАНИРОВАТЬ» ещё раз.');
+      scanning = false;
+      retryBtn.classList.remove('hidden');
+      setStatus('Сессия истекла.', true);
+      return;
+    } else if(data.error === 'missing_token_or_code'){
+      addToList('err', '❌ Пустой код.');
+    } else {
+      addToList('err', `❌ Ошибка при обработке: <b>${code}</b>`);
     }
-    playError();
-
   } catch(e){
     console.error(e);
     addToList('err', `❌ Ошибка сети: <b>${code}</b>`);
-    playError();
   }
 }
+
+async function handleDetected(raw){
+  const code = normalizeCode(raw);
+  if(!code || inFlight) return;
+  const now = Date.now();
+  const last = seen.get(code);
+  if(last && (now - last) <= 2500) return;
+  seen.set(code, now);
+  inFlight = true;
+  setStatus('Проверяю талон…');
+  await submitCode(code);
+  if(scanning) setStatus('Готово. Наведите на следующий QR…');
+  inFlight = false;
+}
+
+async function scanLoop(){
+  if(!scanning || fallbackMode || !detector) return;
+  cleanupSeen();
+  if(!inFlight){
+    try{
+      const codes = await detector.detect(video);
+      if(codes && codes.length){
+        await handleDetected((codes[0].rawValue || '').trim());
+      }
+    } catch(e){
+      console.error(e);
+    }
+  }
+  requestAnimationFrame(scanLoop);
+}
+
+async function startBarcodeDetectorMode(){
+  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio:false });
+  video.srcObject = stream;
+  await video.play();
+  detector = new BarcodeDetector({formats:['qr_code']});
+  fallbackMode = false;
+  scanning = true;
+  setStatus('Готово. Наведите на QR…');
+  scanLoop();
+}
+
+async function startHtml5QrcodeFallback(){
+  fallbackMode = true;
+  setStatus('Запущен резервный сканер QR…');
+  if(!document.getElementById('reader')){
+    const reader = document.createElement('div');
+    reader.id = 'reader';
+    reader.style.marginTop = '14px';
+    scannerArea.appendChild(reader);
+  }
+  html5Scanner = new Html5Qrcode('reader');
+  await html5Scanner.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: { width: 240, height: 240 } },
+    async (decodedText) => { await handleDetected(decodedText); },
+    () => {}
+  );
+  scanning = true;
+  setStatus('Готово. Наведите на QR…');
+}
+
+async function startCamera(){
+  retryBtn.classList.add('hidden');
+  scannerArea.classList.remove('hidden');
+  try{
+    setStatus('Открываю камеру…');
+    if('BarcodeDetector' in window){
+      await startBarcodeDetectorMode();
+    } else if(window.Html5Qrcode){
+      await startHtml5QrcodeFallback();
+    } else {
+      throw new Error('scanner_not_supported');
+    }
+  } catch(e){
+    console.error(e);
+    setStatus('Не удалось открыть камеру. Разрешите доступ к камере или введите код вручную.', true);
+    retryBtn.classList.remove('hidden');
+  }
+}
+
+async function stopCamera(){
+  scanning = false;
+  try{
+    if(html5Scanner){
+      await html5Scanner.stop();
+      await html5Scanner.clear();
+      html5Scanner = null;
+    }
+  }catch(e){ console.error(e); }
+  try{
+    if(stream){
+      stream.getTracks().forEach(t=>t.stop());
+      stream = null;
+    }
+  }catch(e){}
+}
+
+startBtn.addEventListener('click', ()=>{
+  startBtn.disabled = true;
+  startCamera();
+});
+
+retryBtn.addEventListener('click', async ()=>{
+  await stopCamera();
+  inFlight = false;
+  startCamera();
+});
+
+showManualBtn.addEventListener('click', ()=>{
+  manualBox.classList.toggle('hidden');
+  if(!manualBox.classList.contains('hidden')) manualCode.focus();
+});
+
+sendManualBtn.addEventListener('click', async ()=>{
+  const code = normalizeCode(manualCode.value);
+  if(!code){
+    setStatus('Введите код цифрами.', true);
+    manualCode.focus();
+    return;
+  }
+  manualCode.value = '';
+  setStatus('Проверяю талон…');
+  await submitCode(code);
+  if(scanning || fallbackMode) setStatus('Готово. Наведите на следующий QR…');
+});
+
+manualCode.addEventListener('keydown', async (e)=>{
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    sendManualBtn.click();
+  }
+});
+
+finishBtn.addEventListener('click', async ()=>{
+  await stopCamera();
+  const msg = okCount ? `✅ Готово. Закрыто талонов: ${okCount}` : 'Готово.';
+  setStatus(msg);
+  try{
+    if(window.Telegram && Telegram.WebApp){
+      Telegram.WebApp.close();
+    }
+  }catch(e){}
+});
+
+bumpCount();
 </script>
 </body>
 </html>

@@ -432,104 +432,110 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = str(update.effective_user.id)
 
-    sess = BotSession.query.filter_by(
-        telegram_user_id=tg_id,
-        is_active=True
-    ).first()
+    app = context.application.bot_data["flask_app"]
 
-    if not sess:
-        await update.message.reply_text("Сначала войдите.")
-        return
+    with app.app_context():
 
-    shift = Shift.query.filter_by(
-        agzs_id=sess.agzs_id,
-        is_closed=False
-    ).first()
+        sess = _get_session(update.effective_user.id)
 
-    if shift:
-        await update.message.reply_text("⚠️ Смена уже открыта")
-        return
+        if not sess:
+            await update.message.reply_text("Сначала войдите.")
+            return
 
-    shift = Shift(
-        agzs_id=sess.agzs_id,
-        opened_at=kz_now()
+        shift = Shift.query.filter_by(
+            agzs_id=sess.agzs_id,
+            is_closed=False
+        ).first()
+
+        if shift:
+            await update.message.reply_text("⚠️ Смена уже открыта")
+            return
+
+        shift = Shift(
+            agzs_id=sess.agzs_id,
+            opened_at=kz_now(),
+            is_closed=False
+        )
+
+        db.session.add(shift)
+        db.session.commit()
+
+        agzs_name = sess.agzs.name
+
+    await update.message.reply_text(
+        f"🟢 Смена открыта: {agzs_name}"
     )
-
-    db.session.add(shift)
-    db.session.commit()
-
-    await update.message.reply_text(f"🟢 Смена открыта: {sess.agzs.name}")
 
 
 async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = str(update.effective_user.id)
 
-    sess = BotSession.query.filter_by(
-        telegram_user_id=tg_id,
-        is_active=True
-    ).first()
+    app = context.application.bot_data["flask_app"]
 
-    if not sess:
-        await update.message.reply_text("Сначала войдите.")
-        return
+    with app.app_context():
 
-    shift = Shift.query.filter_by(
-        agzs_id=sess.agzs_id,
-        is_closed=False
-    ).first()
+        sess = _get_session(update.effective_user.id)
 
-    if not shift:
-        await update.message.reply_text("Нет открытой смены.")
-        return
+        if not sess:
+            await update.message.reply_text("Сначала войдите.")
+            return
 
-    shift.closed_at = kz_now()
-    shift.is_closed = True
+        shift = Shift.query.filter_by(
+            agzs_id=sess.agzs_id,
+            is_closed=False
+        ).first()
 
-    redemptions = (
-        TalonRedemption.query
-        .filter(
-            TalonRedemption.agzs_id == sess.agzs_id,
-            TalonRedemption.used_at >= shift.opened_at,
-            TalonRedemption.used_at <= shift.closed_at
-        )
-        .order_by(TalonRedemption.used_at.asc())
-        .all()
-    )
+        if not shift:
+            await update.message.reply_text("Нет открытой смены.")
+            return
 
-    total_liters = 0
-    talon_lines = []
+        shift.closed_at = kz_now()
+        shift.is_closed = True
 
-    for i, r in enumerate(redemptions, start=1):
-        talon = r.talon
-        liters = talon.liters or 0
-        total_liters += liters
-
-        time = to_kz(r.used_at).strftime("%H:%M")
-
-        talon_lines.append(
-            f"{i}. №{talon.serial_number} | код {talon.code} | {liters:.2f} л | {time}"
+        redemptions = (
+            TalonRedemption.query
+            .filter(
+                TalonRedemption.agzs_id == sess.agzs_id,
+                TalonRedemption.used_at >= shift.opened_at,
+                TalonRedemption.used_at <= shift.closed_at
+            )
+            .order_by(TalonRedemption.used_at.asc())
+            .all()
         )
 
-    shift.total_talons = len(redemptions)
-    shift.total_liters = total_liters
+        total_liters = 0
+        talon_lines = []
 
-    report = (
-        f"📊 Отчет по смене\n"
-        f"АГЗС: {sess.agzs.name}\n"
-        f"Использовано талонов: {len(redemptions)}\n"
-        f"Всего литров: {total_liters:.2f} л\n\n"
-    )
+        for i, r in enumerate(redemptions, start=1):
 
-    if talon_lines:
-        report += "Талоны:\n" + "\n".join(talon_lines)
-    else:
-        report += "Сегодня талоны не использовали"
+            talon = r.talon
+            liters = float(talon.liters or 0)
+            total_liters += liters
 
-    shift.report_text = report
+            time = to_kz(r.used_at).strftime("%H:%M")
 
-    db.session.commit()
+            talon_lines.append(
+                f"{i}. №{talon.serial_number} | код {talon.code} | {liters:.2f} л | {time}"
+            )
+
+        shift.total_talons = len(redemptions)
+        shift.total_liters = total_liters
+
+        report = (
+            f"📊 Отчет по смене\n"
+            f"АГЗС: {sess.agzs.name}\n"
+            f"Использовано талонов: {len(redemptions)}\n"
+            f"Всего литров: {total_liters:.2f} л\n\n"
+        )
+
+        if talon_lines:
+            report += "Талоны:\n" + "\n".join(talon_lines)
+        else:
+            report += "Сегодня талоны не использовали"
+
+        shift.report_text = report
+
+        db.session.commit()
 
     await update.message.reply_text(report)
     await update.message.reply_text("🔴 Смена закрыта")

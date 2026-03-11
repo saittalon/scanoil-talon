@@ -70,14 +70,14 @@
       </div>
 
       <button id="finish" class="btn secondary">ЗАВЕРШИТЬ</button>
-      <button onclick="document.getElementById('scanSound').play()" class="btn secondary">ТЕСТ ЗВУКА</button>
+      <button id="testSound" class="btn secondary">ТЕСТ ЗВУКА</button>
       <button id="retry" class="btn hidden">ПОВТОРИТЬ</button>
       <div class="muted">Камера продолжит работать после успешного талона, поэтому можно сканировать подряд несколько QR-кодов.</div>
     </div>
   </div>
 
-  <audio id="scanSound" preload="auto">
-    <source src="/static/scan.mp3" type="audio/mpeg">
+  <audio id="scanSound" preload="auto" playsinline>
+    <source src="/static/scan.wav" type="audio/wav">
   </audio>
 
 <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
@@ -87,6 +87,7 @@ const statusEl = document.getElementById('status');
 const video = document.getElementById('video');
 const retryBtn = document.getElementById('retry');
 const finishBtn = document.getElementById('finish');
+const testSoundBtn = document.getElementById('testSound');
 const listEl = document.getElementById('list');
 const countEl = document.getElementById('count');
 const startBtn = document.getElementById('startScan');
@@ -97,6 +98,27 @@ const manualCode = document.getElementById('manualCode');
 const sendManualBtn = document.getElementById('sendManual');
 const scanSound = document.getElementById('scanSound');
 const boxEl = document.querySelector('.box');
+
+let soundUnlocked = false;
+
+async function unlockSound(){
+  if(soundUnlocked) return;
+
+  try{
+    if(!scanSound) return;
+    scanSound.muted = true;
+    scanSound.volume = 0;
+    await scanSound.play();
+    scanSound.pause();
+    scanSound.currentTime = 0;
+    scanSound.muted = false;
+    scanSound.volume = 1.0;
+    soundUnlocked = true;
+    console.log("sound unlocked");
+  }catch(e){
+    console.log("unlock failed", e);
+  }
+}
 
 function setStatus(text, isErr=false){
   statusEl.textContent = text;
@@ -131,10 +153,18 @@ function flashBox(kind){
 function playSuccessFeedback(){
   try{
     if(scanSound){
+      scanSound.pause();
       scanSound.currentTime = 0;
-      scanSound.play().catch(()=>{});
+      scanSound.muted = false;
+      scanSound.volume = 1.0;
+      const p = scanSound.play();
+      if(p && typeof p.catch === "function"){
+        p.catch(err => console.log("sound error", err));
+      }
     }
-  }catch(e){}
+  }catch(e){
+    console.log("sound exception", e);
+  }
 
   try{
     navigator.vibrate && navigator.vibrate(120);
@@ -380,15 +410,32 @@ async function stopCamera(){
   }catch(e){}
 }
 
-startBtn.addEventListener('click', ()=>{
+startBtn.addEventListener('click', async ()=>{
   startBtn.disabled = true;
+  await unlockSound();
   startCamera();
 });
 
 retryBtn.addEventListener('click', async ()=>{
   await stopCamera();
   inFlight = false;
+  await unlockSound();
   startCamera();
+});
+
+testSoundBtn.addEventListener('click', async ()=>{
+  await unlockSound();
+  try{
+    if(scanSound){
+      scanSound.pause();
+      scanSound.currentTime = 0;
+      scanSound.muted = false;
+      scanSound.volume = 1.0;
+      await scanSound.play();
+    }
+  }catch(e){
+    console.log("test sound error", e);
+  }
 });
 
 showManualBtn.addEventListener('click', ()=>{

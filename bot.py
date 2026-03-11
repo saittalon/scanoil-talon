@@ -86,12 +86,15 @@ def _get_session(tg_id):
     ).first()
 
 
-def _shift_open(context: ContextTypes.DEFAULT_TYPE, tg_user_id: int) -> bool:
-    return bool(context.user_data.get(f"shift_open_{tg_user_id}"))
+def _get_open_shift_by_tg_id(tg_id):
+    sess = _get_session(tg_id)
+    if not sess:
+        return None
 
-
-def _set_shift_open(context: ContextTypes.DEFAULT_TYPE, tg_user_id: int, value: bool):
-    context.user_data[f"shift_open_{tg_user_id}"] = bool(value)
+    return Shift.query.filter_by(
+        agzs_id=sess.agzs_id,
+        is_closed=False
+    ).first()
 
 
 def _talon_price(talon: Talon) -> float:
@@ -268,13 +271,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with app.app_context():
         sess = _get_session(update.effective_user.id)
         agzs_name = sess.agzs.name if sess and sess.agzs else None
+        shift = _get_open_shift_by_tg_id(update.effective_user.id)
 
     if agzs_name:
-        scan_url = _make_scan_url(app, update.effective_user.id)
-        await update.message.reply_text(
-            f"✅ Вы вошли: {agzs_name}",
-            reply_markup=_main_keyboard(scan_url)
-        )
+        if shift:
+            scan_url = _make_scan_url(app, update.effective_user.id)
+            await update.message.reply_text(
+                f"✅ Вы вошли: {agzs_name}",
+                reply_markup=_main_keyboard(scan_url)
+            )
+        else:
+            await update.message.reply_text(
+                f"✅ Вы вошли: {agzs_name}\nОткройте смену.",
+                reply_markup=_shift_keyboard()
+            )
     else:
         await update.message.reply_text(
             "👋 Добро пожаловать",
@@ -324,7 +334,6 @@ async def password_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         db.session.commit()
 
-    _set_shift_open(context, update.effective_user.id, False)
     await update.message.reply_text(
         "✅ Вход выполнен",
         reply_markup=_shift_keyboard()
@@ -341,7 +350,6 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sess.is_active = False
             db.session.commit()
 
-    _set_shift_open(context, update.effective_user.id, False)
     await update.message.reply_text("Вы вышли", reply_markup=_auth_keyboard())
 
 
@@ -350,12 +358,13 @@ async def enter_code_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with app.app_context():
         sess = _get_session(update.effective_user.id)
+        shift = _get_open_shift_by_tg_id(update.effective_user.id)
 
     if not sess:
         await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
         return ConversationHandler.END
 
-    if not _shift_open(context, update.effective_user.id):
+    if not shift:
         await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
         return ConversationHandler.END
 
@@ -373,8 +382,14 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with app.app_context():
         sess = _get_session(update.effective_user.id)
+        shift = _get_open_shift_by_tg_id(update.effective_user.id)
+
         if not sess:
             await update.message.reply_text("Сначала войдите")
+            return ConversationHandler.END
+
+        if not shift:
+            await update.message.reply_text("Сначала откройте смену")
             return ConversationHandler.END
 
         talon = Talon.query.filter_by(code=code).first()
@@ -415,9 +430,14 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with app.app_context():
         sess = _get_session(update.effective_user.id)
+        shift = _get_open_shift_by_tg_id(update.effective_user.id)
 
     if not sess:
         await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
+        return
+
+    if not shift:
+        await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
         return
 
     scan_url = _make_scan_url(app, update.effective_user.id)
@@ -432,11 +452,9 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     app = context.application.bot_data["flask_app"]
 
     with app.app_context():
-
         sess = _get_session(update.effective_user.id)
 
         if not sess:
@@ -449,34 +467,30 @@ async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ).first()
 
         if shift:
-            await update.message.reply_text("⚠️ Смена уже открыта")
-            return
-
-        shift = Shift(
-            agzs_id=sess.agzs_id,
-            opened_at=kz_now(),
-            is_closed=False
-        )
-
-        db.session.add(shift)
-        db.session.commit()
-
-        agzs_name = sess.agzs.name
+            agzs_name = sess.agzs.name
+        else:
+            shift = Shift(
+                agzs_id=sess.agzs_id,
+                opened_at=kz_now(),
+                is_closed=False
+            )
+            db.session.add(shift)
+            db.session.commit()
+            agzs_name = sess.agzs.name
 
     scan_url = _make_scan_url(app, update.effective_user.id)
 
-    await update.message.reply_text(
-        f"🟢 Смена открыта: {agzs_name}",
-        reply_markup=_main_keyboard(scan_url)
-    )
+    if shift and shift.closed_at is None and shift.is_closed is False:
+        await update.message.reply_text(
+            f"🟢 Смена открыта: {agzs_name}",
+            reply_markup=_main_keyboard(scan_url)
+        )
 
 
 async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     app = context.application.bot_data["flask_app"]
 
     with app.app_context():
-
         sess = _get_session(update.effective_user.id)
 
         if not sess:
@@ -489,7 +503,7 @@ async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ).first()
 
         if not shift:
-            await update.message.reply_text("Нет открытой смены.")
+            await update.message.reply_text("Нет открытой смены.", reply_markup=_shift_keyboard())
             return
 
         shift.closed_at = kz_now()
@@ -510,11 +524,9 @@ async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         talon_lines = []
 
         for i, r in enumerate(redemptions, start=1):
-
             talon = r.talon
             liters = float(talon.liters or 0)
             total_liters += liters
-
             time = to_kz(r.used_at).strftime("%H:%M")
 
             talon_lines.append(
@@ -537,11 +549,10 @@ async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             report += "Сегодня талоны не использовали"
 
         shift.report_text = report
-
         db.session.commit()
 
     await update.message.reply_text(report)
-    await update.message.reply_text("🔴 Смена закрыта")
+    await update.message.reply_text("🔴 Смена закрыта", reply_markup=_shift_keyboard())
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -550,12 +561,13 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with app.app_context():
         sess = _get_session(tg_user_id)
+        shift = _get_open_shift_by_tg_id(tg_user_id)
 
     if not sess:
         await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
         return
 
-    if not _shift_open(context, tg_user_id):
+    if not shift:
         await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
         return
 
@@ -606,7 +618,6 @@ def main():
 
 
 if __name__ == "__main__":
-
     app = create_app()
 
     with app.app_context():

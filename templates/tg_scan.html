@@ -79,6 +79,10 @@
   <audio id="scanSound" preload="auto" playsinline>
     <source src="/static/scan.wav" type="audio/wav">
   </audio>
+  
+  <audio id="errorSound" preload="auto" playsinline>
+   <source src="/static/error.wav" type="audio/wav">
+ </audio>
 
 <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
 <script>
@@ -97,27 +101,43 @@ const manualBox = document.getElementById('manualBox');
 const manualCode = document.getElementById('manualCode');
 const sendManualBtn = document.getElementById('sendManual');
 const scanSound = document.getElementById('scanSound');
+const errorSound = document.getElementById('errorSound');
 const boxEl = document.querySelector('.box');
 
 let soundUnlocked = false;
 
 async function unlockSound(){
+
   if(soundUnlocked) return;
 
   try{
-    if(!scanSound) return;
-    scanSound.muted = true;
-    scanSound.volume = 0;
-    await scanSound.play();
-    scanSound.pause();
-    scanSound.currentTime = 0;
-    scanSound.muted = false;
-    scanSound.volume = 1.0;
+
+    if(scanSound){
+      scanSound.muted = true;
+      scanSound.volume = 0;
+      await scanSound.play();
+      scanSound.pause();
+      scanSound.currentTime = 0;
+      scanSound.muted = false;
+      scanSound.volume = 1.0;
+    }
+
+    if(errorSound){
+      errorSound.muted = true;
+      errorSound.volume = 0;
+      await errorSound.play();
+      errorSound.pause();
+      errorSound.currentTime = 0;
+      errorSound.muted = false;
+      errorSound.volume = 1.0;
+    }
+
     soundUnlocked = true;
-    console.log("sound unlocked");
+
   }catch(e){
     console.log("unlock failed", e);
   }
+
 }
 
 function setStatus(text, isErr=false){
@@ -180,8 +200,28 @@ function playSuccessFeedback(){
 }
 
 function playErrorFeedback(){
+
   try{
-    navigator.vibrate && navigator.vibrate([80, 60, 80]);
+
+    if(errorSound){
+      errorSound.pause();
+      errorSound.currentTime = 0;
+      errorSound.muted = false;
+      errorSound.volume = 1.0;
+
+      const p = errorSound.play();
+
+      if(p && typeof p.catch === "function"){
+        p.catch(err => console.log("error sound error", err));
+      }
+    }
+
+  }catch(e){
+    console.log("error sound exception", e);
+  }
+
+  try{
+    navigator.vibrate && navigator.vibrate([80,60,80]);
   }catch(e){}
 
   try{
@@ -191,6 +231,7 @@ function playErrorFeedback(){
   }catch(e){}
 
   flashBox('err');
+
 }
 
 let stream = null;

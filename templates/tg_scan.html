@@ -70,7 +70,6 @@
       </div>
 
       <button id="finish" class="btn secondary">ЗАВЕРШИТЬ</button>
-      <button id="testSound" class="btn secondary">ТЕСТ ЗВУКА</button>
       <button id="retry" class="btn hidden">ПОВТОРИТЬ</button>
       <div class="muted">Камера продолжит работать после успешного талона, поэтому можно сканировать подряд несколько QR-кодов.</div>
     </div>
@@ -81,8 +80,8 @@
   </audio>
   
   <audio id="errorSound" preload="auto" playsinline>
-   <source src="/static/error.wav" type="audio/wav">
- </audio>
+    <source src="/static/error.wav" type="audio/wav">
+  </audio>
 
 <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
 <script>
@@ -91,7 +90,6 @@ const statusEl = document.getElementById('status');
 const video = document.getElementById('video');
 const retryBtn = document.getElementById('retry');
 const finishBtn = document.getElementById('finish');
-const testSoundBtn = document.getElementById('testSound');
 const listEl = document.getElementById('list');
 const countEl = document.getElementById('count');
 const startBtn = document.getElementById('startScan');
@@ -107,11 +105,9 @@ const boxEl = document.querySelector('.box');
 let soundUnlocked = false;
 
 async function unlockSound(){
-
   if(soundUnlocked) return;
 
   try{
-
     if(scanSound){
       scanSound.muted = true;
       scanSound.volume = 0;
@@ -133,11 +129,9 @@ async function unlockSound(){
     }
 
     soundUnlocked = true;
-
   }catch(e){
     console.log("unlock failed", e);
   }
-
 }
 
 function setStatus(text, isErr=false){
@@ -200,9 +194,7 @@ function playSuccessFeedback(){
 }
 
 function playErrorFeedback(){
-
   try{
-
     if(errorSound){
       errorSound.pause();
       errorSound.currentTime = 0;
@@ -210,12 +202,10 @@ function playErrorFeedback(){
       errorSound.volume = 1.0;
 
       const p = errorSound.play();
-
       if(p && typeof p.catch === "function"){
         p.catch(err => console.log("error sound error", err));
       }
     }
-
   }catch(e){
     console.log("error sound exception", e);
   }
@@ -231,7 +221,6 @@ function playErrorFeedback(){
   }catch(e){}
 
   flashBox('err');
-
 }
 
 let stream = null;
@@ -390,8 +379,17 @@ async function startHtml5QrcodeFallback(){
   fallbackMode = true;
   setStatus('Запущен резервный сканер QR…');
 
-  if(!document.getElementById('reader')){
-    const reader = document.createElement('div');
+  try{
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+  }catch(e){}
+
+  let reader = document.getElementById('reader');
+  if(!reader){
+    reader = document.createElement('div');
     reader.id = 'reader';
     reader.style.marginTop = '14px';
     scannerArea.appendChild(reader);
@@ -412,26 +410,39 @@ async function startHtml5QrcodeFallback(){
 async function startCamera(){
   retryBtn.classList.add('hidden');
   scannerArea.classList.remove('hidden');
+  startBtn.disabled = true;
 
   try{
     setStatus('Открываю камеру…');
 
     if('BarcodeDetector' in window){
-      await startBarcodeDetectorMode();
-    } else if(window.Html5Qrcode){
-      await startHtml5QrcodeFallback();
-    } else {
-      throw new Error('scanner_not_supported');
+      try{
+        await startBarcodeDetectorMode();
+        return;
+      } catch(e){
+        console.error('BarcodeDetector failed, switching to fallback', e);
+      }
     }
+
+    if(window.Html5Qrcode){
+      await startHtml5QrcodeFallback();
+      return;
+    }
+
+    throw new Error('scanner_not_supported');
   } catch(e){
     console.error(e);
     setStatus('Не удалось открыть камеру. Разрешите доступ к камере или введите код вручную.', true);
     retryBtn.classList.remove('hidden');
+    startBtn.disabled = false;
   }
 }
 
 async function stopCamera(){
   scanning = false;
+  detector = null;
+  inFlight = false;
+  fallbackMode = false;
 
   try{
     if(html5Scanner){
@@ -449,34 +460,21 @@ async function stopCamera(){
       stream = null;
     }
   }catch(e){}
+
+  try{
+    video.srcObject = null;
+  }catch(e){}
 }
 
 startBtn.addEventListener('click', async ()=>{
-  startBtn.disabled = true;
   await unlockSound();
-  startCamera();
+  await startCamera();
 });
 
 retryBtn.addEventListener('click', async ()=>{
   await stopCamera();
-  inFlight = false;
   await unlockSound();
-  startCamera();
-});
-
-testSoundBtn.addEventListener('click', async ()=>{
-  await unlockSound();
-  try{
-    if(scanSound){
-      scanSound.pause();
-      scanSound.currentTime = 0;
-      scanSound.muted = false;
-      scanSound.volume = 1.0;
-      await scanSound.play();
-    }
-  }catch(e){
-    console.log("test sound error", e);
-  }
+  await startCamera();
 });
 
 showManualBtn.addEventListener('click', ()=>{
@@ -508,6 +506,7 @@ manualCode.addEventListener('keydown', async (e)=>{
 
 finishBtn.addEventListener('click', async ()=>{
   await stopCamera();
+  startBtn.disabled = false;
   const msg = okCount ? `✅ Готово. Закрыто талонов: ${okCount}` : 'Готово.';
   setStatus(msg);
 

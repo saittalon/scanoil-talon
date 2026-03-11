@@ -20,7 +20,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from app import create_app
-from models import db, Talon, AGZS, BotSession, TalonRedemption, WebAppToken
+from models import db, Talon, AGZS, BotSession, TalonRedemption, WebAppToken, Shift
 from helpers import kz_now, to_kz
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()

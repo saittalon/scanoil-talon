@@ -467,21 +467,25 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=_main_keyboard(scan_url)
     )
 
-
 async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
 
     with app.app_context():
+
         sess = _get_session(update.effective_user.id)
 
         if not sess:
             await update.message.reply_text("Сначала войдите.")
             return
 
-        agzs_name = sess.agzs.name if sess.agzs else "АГЗС"
-        existing_shift = _get_open_shift_for_agzs(sess.agzs_id)
+        agzs_name = sess.agzs.name
 
-        if existing_shift:
+        shift = Shift.query.filter_by(
+            agzs_id=sess.agzs_id,
+            is_closed=False
+        ).first()
+
+        if shift:
             already_open = True
         else:
             new_shift = Shift(
@@ -489,8 +493,10 @@ async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 opened_at=kz_now(),
                 is_closed=False
             )
+
             db.session.add(new_shift)
             db.session.commit()
+
             already_open = False
 
     scan_url = _make_scan_url(app, update.effective_user.id)
@@ -505,6 +511,7 @@ async def open_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🟢 Смена открыта: {agzs_name}",
             reply_markup=_main_keyboard(scan_url)
         )
+
 
 
 async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):

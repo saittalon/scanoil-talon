@@ -212,3 +212,23 @@ class TalonRedemption(db.Model):
     telegram_user_id = db.Column(db.String(50), nullable=True)
     used_at = db.Column(db.DateTime, default=datetime.utcnow)
     source = db.Column(db.String(20), default="telegram")
+
+
+class Shift(db.Model):
+    __tablename__ = "shifts"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    agzs_id = db.Column(db.Integer, db.ForeignKey("agzs.id"), nullable=False)
+    agzs = db.relationship("AGZS")
+
+    opened_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    closed_at = db.Column(db.DateTime)
+
+    total_talons = db.Column(db.Integer, default=0)
+    total_liters = db.Column(db.Float, default=0)
+    total_amount = db.Column(db.Float, default=0)
+
+    report_text = db.Column(db.Text)
+
+    is_closed = db.Column(db.Boolean, default=False)

@@ -295,22 +295,17 @@ function playSuccessFeedback(){
         p.catch(err => console.log("sound error", err));
       }
     }
-  }catch(e){
-    console.log("sound exception", e);
-  }
-
-  try{
-    navigator.vibrate && navigator.vibrate(120);
-  }catch(e){}
-
-  try{
-    if(window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback){
-      Telegram.WebApp.HapticFeedback.notificationOccurred("success");
-    }
   }catch(e){}
 
   flashBox('ok');
   flashResult('ok');
+
+  setTimeout(()=>{
+    if(window.Telegram && Telegram.WebApp){
+      Telegram.WebApp.close()
+    }
+  },1200)
+
 }
 
 function playErrorFeedback(){
@@ -342,6 +337,11 @@ function playErrorFeedback(){
 
   flashBox('err');
   flashResult('error');
+  setTimeout(()=>{
+  if(window.Telegram && Telegram.WebApp){
+    Telegram.WebApp.close()
+  }
+},1200)
 }
 
 let stream = null;
@@ -647,6 +647,10 @@ finishBtn.addEventListener('click', async ()=>{
 });
 
 bumpCount();
+document.addEventListener("DOMContentLoaded", async ()=>{
+  await unlockSound()
+  await startCamera()
+})
 </script>
 </body>
 </html>

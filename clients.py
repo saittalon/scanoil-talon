@@ -50,7 +50,7 @@ def _client_tabs(client: Client):
 def balance_set(client_id):
     client = Client.query.get_or_404(client_id)
 
-    if not is_admin():
+    if not can_edit_contracts():
         flash("Недостаточно прав.", "danger")
         return redirect(url_for("clients.client_contracts", client_id=client.id))
 
@@ -662,31 +662,28 @@ def talon_use(talon_id):
 def talon_extend(talon_id):
     t = Talon.query.get_or_404(talon_id)
 
+    if not has_role("director", "deputy_director"):
+        flash("Продлевать талоны может только директор или замдиректора.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+
     try:
         new_valid_to = datetime.strptime(request.form.get("new_valid_to") or "", "%Y-%m-%d").date()
     except Exception:
         flash("Укажите новую дату окончания.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
-    today = kz_today()
-    if new_valid_to <= today:
+    if new_valid_to <= date.today():
         flash("Новая дата должна быть больше сегодняшней.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
-    t.valid_from = today
     t.valid_to = new_valid_to
-    t.state = "active"
+    if t.state == "expired":
+        t.state = "active"
 
     db.session.commit()
-    notify_event("Талон продлен", f"Талон {t.serial_number} продлен с {today} до {new_valid_to} пользователем {current_user.username}")
-    flash("Срок действия талона продлен, талон снова активен.", "success")
-    return redirect(url_for(
-        "clients.client_talons",
-        client_id=t.client_id,
-        status="active",
-        date_from=t.valid_from.isoformat(),
-        date_to=t.valid_to.isoformat(),
-    ))
+    notify_event("Талон продлен", f"Талон {t.serial_number} продлен до {new_valid_to} пользователем {current_user.username}")
+    flash("Срок действия талона продлен.", "success")
+    return redirect(url_for("clients.client_talons", client_id=t.client_id, status="active"))
 
 
 # ---------------- QR ----------------
@@ -898,7 +895,6 @@ def client_reports(client_id):
     used_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "used")
     active_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "active")
     expired_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "expired")
-    blocked_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "blocked")
     balance_liters = sum(float(b.liters_left or 0) for b in balances)
 
     return render_template(
@@ -916,7 +912,6 @@ def client_reports(client_id):
         used_liters=used_liters,
         active_liters=active_liters,
         expired_liters=expired_liters,
-        blocked_liters=blocked_liters,
         balance_liters=balance_liters,
         tabs=_client_tabs(client),
         active_tab="reports",

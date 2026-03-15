@@ -1,22 +1,25 @@
 import os
 
-db_url = os.getenv("DATABASE_URL", "sqlite:///coupons.db")
+db_url = os.getenv("DATABASE_URL", "")
 
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+engine_options = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
+
+if db_url.startswith("postgresql://"):
+    engine_options["connect_args"] = {
+        "sslmode": "require"
+    }
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
     SQLALCHEMY_DATABASE_URI = db_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_pre_ping": True,
-        "pool_recycle": 300,
-        "connect_args": {
-            "sslmode": "require"
-        }
-    }
+    SQLALCHEMY_ENGINE_OPTIONS = engine_options
 
     SMTP_HOST = os.getenv("SMTP_HOST", "")
     SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))

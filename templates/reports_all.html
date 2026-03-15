@@ -2,26 +2,26 @@
 {% block content %}
 {% set total_qty = rows|sum(attribute='Количество') %}
 {% set total_cost = rows|sum(attribute='Стоимость') %}
-{% set total_clients = rows|map(attribute='Клиент')|list|unique|list|length if rows else 0 %}
+{% set total_clients = summary_rows|length if summary_rows else 0 %}
 
 <div class="page-hero">
   <div class="hero-kicker">Общий отчёт</div>
-  <div class="hero-title">Реализация сжиженного газа и активность по всем клиентам</div>
-  
+  <div class="hero-title">Детальный отчёт по всем клиентам</div>
+  <div class="hero-subtitle">Сводка по талонам, литрам, остаткам по договорам и детализация по каждому клиенту.</div>
 </div>
 
 <div class="report-stat-grid mb-4">
-  <div class="metric-card"><div class="metric-label">Операции</div><div class="metric-value">{{ rows|length }}</div><div class="metric-foot">Использованные талоны</div></div>
-  <div class="metric-card"><div class="metric-label">Реализовано СУГ</div><div class="metric-value">{{ '%.0f'|format(total_qty) }} л</div><div class="metric-foot">Суммарный объём</div></div>
-  <div class="metric-card"><div class="metric-label">Сумма</div><div class="metric-value">{{ '%.0f'|format(total_cost) }} ₸</div><div class="metric-foot">Общая стоимость операций</div></div>
+  <div class="metric-card"><div class="metric-label">Клиенты</div><div class="metric-value">{{ total_clients }}</div><div class="metric-foot">В выборке отчёта</div></div>
+  <div class="metric-card"><div class="metric-label">Всего литров</div><div class="metric-value">{{ '%.2f'|format(total_qty) }} л</div><div class="metric-foot">Номинал всех талонов</div></div>
+  <div class="metric-card"><div class="metric-label">Остаток по договорам</div><div class="metric-value">{{ '%.2f'|format(total_balance_liters) }} л</div><div class="metric-foot">Ещё можно выдать</div></div>
+  <div class="metric-card"><div class="metric-label">Сумма</div><div class="metric-value">{{ '%.0f'|format(total_cost) }} ₸</div><div class="metric-foot">Общая стоимость</div></div>
 </div>
 
 <div class="report-grid mb-4">
   <div class="card card-soft section-card">
     <div class="section-title">Фильтр периода</div>
-    <div class="section-subtitle">Общий отчёт строится по использованным талонам.</div>
+    <div class="section-subtitle">Можно отобрать общий отчёт по диапазону дат.</div>
     <form class="row g-3" method="get" action="/reports/all">
-      <input type="hidden" name="preset" value="">
       <div class="col-md-4">
         <label class="form-label">Период (от)</label>
         <input class="form-control" type="date" name="date_from" value="{{ date_from or '' }}">
@@ -37,77 +37,99 @@
     </form>
   </div>
   <div class="card card-soft section-card chart-card">
-    <div class="section-title">График реализации СУГ</div>
-    <div class="section-subtitle">Сумма литров по клиентам за выбранный период.</div>
-    <div class="chart-wrap"><canvas id="salesChart"></canvas></div>
+    <div class="section-title">Сводка по статусам</div>
+    <div class="section-subtitle">Литры по активным, использованным, просроченным и заблокированным талонам.</div>
+    <div class="chart-wrap"><canvas id="statusSummaryChart"></canvas></div>
+  </div>
+</div>
+
+<div class="report-grid mb-4">
+  <div class="card card-soft section-card">
+    <div class="section-title">Сводка по клиентам</div>
+    <div class="section-subtitle">Почти как отчёт по одному клиенту, только сразу по всем.</div>
+    <div class="table-shell"><div class="table-responsive"><table class="table table-sm mb-0">
+      <thead>
+        <tr><th>Клиент</th><th>Талонов</th><th>Всего литров</th><th>Активные</th><th>Использованные</th><th>Просроченные</th><th>Заблокированные</th><th>Сумма</th></tr>
+      </thead>
+      <tbody>
+        {% for r in summary_rows %}
+        <tr>
+          <td>{{ r['Клиент'] }}</td>
+          <td>{{ r['Талонов'] }}</td>
+          <td>{{ '%.2f'|format(r['Всего литров']) }} л</td>
+          <td>{{ '%.2f'|format(r['Активные литры']) }} л</td>
+          <td>{{ '%.2f'|format(r['Использованные литры']) }} л</td>
+          <td>{{ '%.2f'|format(r['Просроченные литры']) }} л</td>
+          <td>{{ '%.2f'|format(r['Заблокированные литры']) }} л</td>
+          <td>{{ '%.0f'|format(r['Сумма']) }} ₸</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty-state">Нет данных по клиентам за выбранный период.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card card-soft section-card">
+    <div class="section-title">Остатки по договорам</div>
+    <div class="section-subtitle">Сколько литров ещё осталось по каждому договору.</div>
+    <div class="table-shell"><div class="table-responsive"><table class="table table-sm mb-0">
+      <thead>
+        <tr><th>Клиент</th><th>Договор</th><th>Товар</th><th>Остаток</th><th>Контроль</th><th>Обновлено</th></tr>
+      </thead>
+      <tbody>
+        {% for b in balance_rows %}
+        <tr>
+          <td>{{ b['Клиент'] }}</td><td>{{ b['Договор'] }}</td><td>{{ b['Товар'] }}</td>
+          <td>{{ '%.2f'|format(b['Остаток']) }} л</td><td>{{ b['Контроль'] }}</td><td>{{ b['Обновлено'] or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty-state">Остатки по договорам не заведены.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table></div></div>
   </div>
 </div>
 
 <div class="card card-soft section-card">
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
     <div>
-      <div class="section-title">Таблица операций</div>
-      <div class="section-subtitle mb-0">Детализация по дате, клиенту, объёму и стоимости.</div>
+      <div class="section-title">Детальная таблица талонов</div>
+      <div class="section-subtitle mb-0">Полная детализация: клиент, договор, доп. соглашение, номинал, остаток и списание.</div>
     </div>
     <span class="pill-stat">Клиентов в выборке: {{ total_clients }}</span>
   </div>
-  <div class="table-shell">
-    <div class="table-responsive">
-      <table class="table table-sm mb-0">
-        <thead>
-          <tr>
-            <th>Дата</th><th>Время</th><th>Владелец</th><th>Клиент</th><th>Операция</th>
-            <th>Услуга</th><th>Количество</th><th>Цена</th><th>Стоимость</th><th>АЗС</th><th>Адрес</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
-          <tr>
-            <td>{{ r["Дата"] }}</td>
-            <td>{{ r["Время"] }}</td>
-            <td>{{ r["Владелец"] }}</td>
-            <td>{{ r["Клиент"] }}</td>
-            <td>{{ r["Операция"] }}</td>
-            <td>{{ r["Услуга"] }}</td>
-            <td>{{ r["Количество"] }}</td>
-            <td>{{ r["Цена"] }}</td>
-            <td><b>{{ r["Стоимость"] }}</b></td>
-            <td>{{ r["АЗС"] }}</td>
-            <td>{{ r["Адрес"] }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="11" class="empty-state">Нет операций за выбранный период.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+  <div class="table-shell"><div class="table-responsive"><table class="table table-sm mb-0">
+    <thead>
+      <tr>
+        <th>Дата</th><th>Время</th><th>Клиент</th><th>Владелец</th><th>Договор</th><th>Доп. соглашение</th><th>Услуга</th><th>Номинал</th><th>Остаток</th><th>Списано</th><th>Цена</th><th>Стоимость</th><th>АЗС</th><th>Статус</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['Дата'] }}</td><td>{{ r['Время'] }}</td><td>{{ r['Клиент'] }}</td><td>{{ r['Владелец'] }}</td><td>{{ r['Договор'] }}</td><td>{{ r['Доп. соглашение'] }}</td><td>{{ r['Услуга'] }}</td><td>{{ '%.2f'|format(r['Количество']) }} л</td><td>{{ '%.2f'|format(r['Остаток']) }} л</td><td>{{ '%.2f'|format(r['Списано']) }} л</td><td>{{ '%.2f'|format(r['Цена']) }}</td><td><b>{{ '%.2f'|format(r['Стоимость']) }}</b></td><td>{{ r['АЗС'] }}</td><td>{{ r['Статус'] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="14" class="empty-state">Нет операций за выбранный период.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div></div>
 </div>
 
 <script>
-  const rawRows = {{ rows|tojson }};
-  const grouped = {};
-  rawRows.forEach(r => {
-    const key = r['Клиент'] || 'Без клиента';
-    grouped[key] = (grouped[key] || 0) + Number(r['Количество'] || 0);
+const statusCtx = document.getElementById('statusSummaryChart');
+if (statusCtx) {
+  new Chart(statusCtx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Активные', 'Использованные', 'Просроченные', 'Заблокированные'],
+      datasets: [{ data: [{{ active_total }}, {{ used_total }}, {{ expired_total }}, {{ blocked_total }}] }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#dce8ff' } } }
+    }
   });
-  const salesCtx = document.getElementById('salesChart');
-  if (salesCtx) {
-    new Chart(salesCtx, {
-      type: 'bar',
-      data: {
-        labels: Object.keys(grouped),
-        datasets: [{ label: 'Литры', data: Object.values(grouped), borderWidth: 0, borderRadius: 8 }]
-      },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#dce8ff' } } },
-        scales: {
-          x: { ticks: { color: '#aebfe3' }, grid: { color: 'rgba(255,255,255,.05)' } },
-          y: { ticks: { color: '#aebfe3' }, grid: { color: 'rgba(255,255,255,.05)' } }
-        }
-      }
-    });
-  }
+}
 </script>
 {% endblock %}

@@ -193,10 +193,85 @@ def client_report_excel(client_id: int):
             pass
 
     talons = q.order_by(Talon.id.asc()).all()
-    df = pd.DataFrame(_client_rows(talons, client))
+    balances = Balance.query.filter_by(client_id=client.id).all()
+
+    total_count = len(talons)
+    active_count = sum(1 for t in talons if t.effective_state == 'active')
+    used_count = sum(1 for t in talons if t.effective_state == 'used')
+    expired_count = sum(1 for t in talons if t.effective_state == 'expired')
+    blocked_count = sum(1 for t in talons if t.effective_state == 'blocked')
+
+    total_liters = sum(float(t.liters or 0) for t in talons)
+    active_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'active')
+    used_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'used')
+    expired_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'expired')
+    blocked_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'blocked')
+    balance_liters = sum(float(b.liters_left or 0) for b in balances)
+
+    detail_rows = _client_rows(talons, client)
+    detail_rows = sorted(detail_rows, key=lambda r: ((r.get('Доп. соглашение') or '—'), str(r.get('№') or '')))
+
+    addendum_summary = {}
+    for row in detail_rows:
+        addendum = row.get('Доп. соглашение') or '— без доп. соглашения —'
+        bucket = addendum_summary.setdefault(addendum, {
+            'Доп. соглашение': addendum,
+            'Талонов': 0,
+            'Всего литров': 0.0,
+            'Остаток литров': 0.0,
+            'Списано литров': 0.0,
+            'Сумма': 0.0,
+        })
+        bucket['Талонов'] += 1
+        bucket['Всего литров'] += float(row.get('Номинал') or 0)
+        bucket['Остаток литров'] += float(row.get('Остаток') or 0)
+        bucket['Списано литров'] += float(row.get('Списано') or 0)
+        bucket['Сумма'] += float(row.get('Стоимость') or 0)
+
+    summary_df = pd.DataFrame([
+        {'Показатель': 'Клиент', 'Значение': client.name},
+        {'Показатель': 'Период (от)', 'Значение': date_from or '—'},
+        {'Показатель': 'Период (до)', 'Значение': date_to or '—'},
+        {'Показатель': 'Всего талонов', 'Значение': total_count},
+        {'Показатель': 'Активные талоны', 'Значение': active_count},
+        {'Показатель': 'Использованные талоны', 'Значение': used_count},
+        {'Показатель': 'Просроченные талоны', 'Значение': expired_count},
+        {'Показатель': 'Заблокированные талоны', 'Значение': blocked_count},
+        {'Показатель': 'Всего литров', 'Значение': total_liters},
+        {'Показатель': 'Активный объём, л', 'Значение': active_liters},
+        {'Показатель': 'Использовано литров', 'Значение': used_liters},
+        {'Показатель': 'Просрочено литров', 'Значение': expired_liters},
+        {'Показатель': 'Заблокировано литров', 'Значение': blocked_liters},
+        {'Показатель': 'Осталось газа по договорам, л', 'Значение': balance_liters},
+    ])
+    addendum_df = pd.DataFrame(list(addendum_summary.values()))
+    detail_df = pd.DataFrame(detail_rows)
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='client_report')
+        sheet_name = 'client_report'
+        summary_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=0)
+
+        addendum_start = len(summary_df) + 3
+        addendum_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=addendum_start)
+
+        detail_start = addendum_start + len(addendum_df) + 4
+        detail_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=detail_start)
+
+        ws = writer.sheets[sheet_name]
+        ws['A1'] = 'Сводка по клиенту'
+        ws['A%d' % (addendum_start + 1)] = 'Сводка по доп. соглашениям'
+        ws['A%d' % (detail_start + 1)] = 'Детальный отчёт по талонам'
+
+        widths = {
+            'A': 14, 'B': 20, 'C': 18, 'D': 16, 'E': 24, 'F': 14, 'G': 12, 'H': 12,
+            'I': 12, 'J': 12, 'K': 12, 'L': 16, 'M': 18, 'N': 14, 'O': 16, 'P': 20,
+            'Q': 12, 'R': 14,
+        }
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+        ws.freeze_panes = f'A{detail_start + 2}'
+
     output.seek(0)
     return send_file(output, as_attachment=True, download_name=f'report_{client.name}.xlsx'.replace(' ', '_'), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 

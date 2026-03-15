@@ -48,7 +48,7 @@
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients.contract_edit_get', client_id=client.id, contract_id=selected.id) }}">Редактировать</a>
-          {% if current_role in ["director","deputy_director","executor"] %}<button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Добавить остатки для талонов</button>{% endif %}
+          {% if current_role in ["director","deputy_director"] %}<button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Добавить остатки для талонов</button>{% endif %}
         </div>
       </div>
 
@@ -144,7 +144,7 @@
             <h6 class="mb-2">Остатки для талонов</h6>
             <div class="client-meta">Контроль литров по выбранному договору</div>
           </div>
-          {% if current_role in ["director","deputy_director","executor"] %}<button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Изменить остаток</button>{% endif %}
+          <button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Изменить остаток</button>
         </div>
         <div class="fw-bold">{{ ('%.2f'|format(balance.liters_left)) if balance else '0.00' }} л</div>
       </div>

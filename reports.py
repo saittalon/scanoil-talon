@@ -227,11 +227,39 @@ def reports_all_page():
     talons = q.order_by(Talon.created_at.desc()).all()
     rows, summary_rows, balance_rows = _build_all_reports_data(talons)
     total_balance_liters = sum(float(item['Остаток'] or 0) for item in balance_rows)
-    active_total = sum(float(item['Активные литры']) for item in summary_rows)
-    used_total = sum(float(item['Использованные литры']) for item in summary_rows)
-    expired_total = sum(float(item['Просроченные литры']) for item in summary_rows)
-    blocked_total = sum(float(item['Заблокированные литры']) for item in summary_rows)
-    return render_template('reports_all.html', rows=rows, summary_rows=summary_rows, balance_rows=balance_rows, total_balance_liters=total_balance_liters, active_total=active_total, used_total=used_total, expired_total=expired_total, blocked_total=blocked_total, date_from=date_from, date_to=date_to, selected_month=month)
+
+    total_count = len(talons)
+    active_count = sum(1 for t in talons if t.effective_state == 'active')
+    used_count = sum(1 for t in talons if t.effective_state == 'used')
+    expired_count = sum(1 for t in talons if t.effective_state == 'expired')
+    blocked_count = sum(1 for t in talons if t.effective_state == 'blocked')
+
+    total_liters = sum(float(t.liters or 0) for t in talons)
+    active_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'active')
+    used_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'used')
+    expired_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'expired')
+    blocked_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'blocked')
+
+    return render_template(
+        'reports_all.html',
+        rows=rows,
+        summary_rows=summary_rows,
+        balance_rows=balance_rows,
+        total_balance_liters=total_balance_liters,
+        total_count=total_count,
+        active_count=active_count,
+        used_count=used_count,
+        expired_count=expired_count,
+        blocked_count=blocked_count,
+        total_liters=total_liters,
+        active_liters=active_liters,
+        used_liters=used_liters,
+        expired_liters=expired_liters,
+        blocked_liters=blocked_liters,
+        date_from=date_from,
+        date_to=date_to,
+        selected_month=month,
+    )
 
 
 @reports_bp.get('/reports')

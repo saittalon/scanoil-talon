@@ -26,6 +26,10 @@ def is_admin():
     return has_role("director", "deputy_director")
 
 
+def can_edit_balances():
+    return has_role("director", "deputy_director", "executor")
+
+
 def can_edit_contracts():
     return has_role("director", "deputy_director", "executor")
 
@@ -50,7 +54,7 @@ def _client_tabs(client: Client):
 def balance_set(client_id):
     client = Client.query.get_or_404(client_id)
 
-    if not is_admin():
+    if not can_edit_balances():
         flash("Недостаточно прав.", "danger")
         return redirect(url_for("clients.client_contracts", client_id=client.id))
 

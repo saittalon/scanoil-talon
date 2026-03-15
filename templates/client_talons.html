@@ -48,6 +48,7 @@
             <th>QR</th>
             <th>Услуга</th>
             <th>Номинал</th>
+            <th>Остаток</th>
             <th>Период</th>
             <th>Доп. соглашение</th>
             <th>Статус</th>
@@ -65,7 +66,8 @@
               </a>
             </td>
             <td>{{ t.product_name }}</td>
-            <td>{{ t.liters }} л</td>
+            <td>{{ '%.2f'|format(t.liters or 0) }} л</td>
+            <td>{% if t.effective_state == 'used' %}0.00 л{% else %}{{ '%.2f'|format(t.liters or 0) }} л{% endif %}</td>
             <td>{{ t.valid_from }} – {{ t.valid_to }}</td>
             <td>{{ t.addendum_file.original_name if t.addendum_file else "—" }}</td>
             <td>
@@ -96,7 +98,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="9" class="text-center text-muted py-4">Талоны не найдены</td>
+            <td colspan="10" class="text-center text-muted py-4">Талоны не найдены</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -228,7 +230,7 @@
           const b = BALANCES[contractId];
           if(!b.balance_control){
             info.className = 'alert alert-light border mb-0';
-            info.innerHTML = 'Баланс по договору не контролируется.';
+            info.innerHTML = 'Баланс по договору не контролируется. Талоны можно создать без проверки остатка.';
             info.style.display = 'block';
             btn.disabled = false;
             return;

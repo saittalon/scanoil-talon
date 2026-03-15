@@ -1,26 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
 {% include "_client_header.html" %}
-{% set active_count = talons|selectattr('state', 'equalto', 'active')|list|length %}
-{% set used_count = talons|selectattr('status_label', 'equalto', 'Использован')|list|length %}
-{% set total_liters = talons|sum(attribute='liters') %}
 
 <div class="page-hero">
   <div class="hero-kicker">Отчёт по клиенту</div>
   <div class="hero-title">Талоны, объём СУГ и статус использования</div>
-  <div class="hero-subtitle">Теперь отчёт по клиенту выглядит как мини-dashboard: сверху ключевые цифры, ниже — график по статусам и подробная таблица.</div>
+  <div class="hero-subtitle">Детальный отчёт по талонам, объёму газа, остаткам по договорам и использованию.</div>
 </div>
 
 <div class="report-stat-grid mb-4">
   <div class="metric-card"><div class="metric-label">Всего талонов</div><div class="metric-value">{{ talons|length }}</div><div class="metric-foot">В выборке по клиенту</div></div>
-  <div class="metric-card"><div class="metric-label">Активные</div><div class="metric-value">{{ active_count }}</div><div class="metric-foot">Можно использовать</div></div>
-  <div class="metric-card"><div class="metric-label">Литры</div><div class="metric-value">{{ '%.0f'|format(total_liters) }} л</div><div class="metric-foot">Общий объём талонов</div></div>
+  <div class="metric-card"><div class="metric-label">Активные</div><div class="metric-value">{{ active_count }}</div><div class="metric-foot">Можно использовать сейчас</div></div>
+  <div class="metric-card"><div class="metric-label">Использованные</div><div class="metric-value">{{ used_count }}</div><div class="metric-foot">Уже списаны</div></div>
+  <div class="metric-card"><div class="metric-label">Просроченные</div><div class="metric-value">{{ expired_count }}</div><div class="metric-foot">Нужно продлить или закрыть</div></div>
+  <div class="metric-card"><div class="metric-label">Общий объём</div><div class="metric-value">{{ '%.2f'|format(total_liters) }} л</div><div class="metric-foot">Все талоны в выборке</div></div>
+  <div class="metric-card"><div class="metric-label">Использовано литров</div><div class="metric-value">{{ '%.2f'|format(used_liters) }} л</div><div class="metric-foot">По использованным талонам</div></div>
+  <div class="metric-card"><div class="metric-label">Активный объём</div><div class="metric-value">{{ '%.2f'|format(active_liters) }} л</div><div class="metric-foot">Доступно по активным талонам</div></div>
+  <div class="metric-card"><div class="metric-label">Осталось газа</div><div class="metric-value">{{ '%.2f'|format(balance_liters) }} л</div><div class="metric-foot">Остаток по договорам клиента</div></div>
 </div>
 
 <div class="report-grid mb-4">
   <div class="card card-soft section-card">
     <div class="section-title">Фильтр периода</div>
-    <div class="section-subtitle">Можно быстро выгрузить Excel по нужному диапазону.</div>
+    <div class="section-subtitle">Можно быстро посмотреть период и скачать Excel.</div>
     <form class="row g-3" method="get" action="{{ url_for('clients.client_reports', client_id=client.id) }}">
       <div class="col-md-4">
         <label class="form-label">Период действия (от)</label>
@@ -38,38 +40,100 @@
   </div>
   <div class="card card-soft section-card chart-card">
     <div class="section-title">Статусы талонов</div>
-    <div class="section-subtitle">Сразу видно, сколько талонов уже использовано, а сколько остаётся активными.</div>
+    <div class="section-subtitle">Сразу видно, сколько талонов активно, сколько использовано и сколько просрочено.</div>
     <div class="chart-wrap"><canvas id="clientStatusChart"></canvas></div>
   </div>
 </div>
 
+<div class="report-grid mb-4">
+  <div class="card card-soft section-card">
+    <div class="section-title">Остатки по договорам</div>
+    <div class="section-subtitle">Сколько литров ещё можно использовать для создания талонов.</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr><th>Договор</th><th>Товар</th><th>Остаток</th><th>Контроль</th><th>Обновлено</th></tr>
+          </thead>
+          <tbody>
+            {% for b in balances %}
+            <tr>
+              <td>{{ b.contract.number if b.contract else '—' }}</td>
+              <td>{{ b.product_name }}</td>
+              <td>{{ '%.2f'|format(b.liters_left or 0) }} л</td>
+              <td>{{ 'Да' if b.balance_control else 'Нет' }}</td>
+              <td>{{ format_kz(b.updated_at) if b.updated_at else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="empty-state">Остатки по договорам ещё не заведены.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card card-soft section-card">
+    <div class="section-title">Сводка по литрам</div>
+    <div class="section-subtitle">Быстрая детализация по объёму газа.</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <tbody>
+            <tr><th>Всего литров в талонах</th><td>{{ '%.2f'|format(total_liters) }} л</td></tr>
+            <tr><th>Активные литры</th><td>{{ '%.2f'|format(active_liters) }} л</td></tr>
+            <tr><th>Использованные литры</th><td>{{ '%.2f'|format(used_liters) }} л</td></tr>
+            <tr><th>Просроченные литры</th><td>{{ '%.2f'|format(expired_liters) }} л</td></tr>
+            <tr><th>Осталось газа по договорам</th><td>{{ '%.2f'|format(balance_liters) }} л</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="card card-soft section-card">
-  <div class="section-title">Таблица талонов</div>
-  <div class="section-subtitle">Подробный журнал по талонам клиента.</div>
+  <div class="section-title">Детальная таблица талонов</div>
+  <div class="section-subtitle">Показывает договор, доп. соглашение, номинал, остаток по талону и факт использования.</div>
   <div class="table-shell">
     <div class="table-responsive">
       <table class="table table-sm align-middle mb-0">
         <thead>
           <tr>
-            <th>№</th><th>Клиент</th><th>Держатель</th><th>Товар</th><th>Номинал</th><th>С</th><th>По</th><th>Талон</th><th>Статус</th><th>Использован</th>
+            <th>№</th>
+            <th>Код</th>
+            <th>Договор</th>
+            <th>Доп. соглашение</th>
+            <th>Товар</th>
+            <th>Номинал</th>
+            <th>Остаток</th>
+            <th>Списано</th>
+            <th>С</th>
+            <th>По</th>
+            <th>Статус</th>
+            <th>Использован</th>
           </tr>
         </thead>
         <tbody>
           {% for t in talons %}
+          {% set status = talon_status_label(t) %}
+          {% set left = 0 if t.effective_state == 'used' else (t.liters or 0) %}
+          {% set spent = (t.liters or 0) - left %}
           <tr>
             <td>{{ t.serial_number }}</td>
-            <td>{{ client.name }}</td>
-            <td>{{ t.holder_name }}</td>
-            <td>{{ t.product_name }}</td>
-            <td>{{ t.liters }}</td>
-            <td>{{ t.valid_from.strftime("%d.%m.%Y") }}</td>
-            <td>{{ t.valid_to.strftime("%d.%m.%Y") }}</td>
             <td>{{ t.code }}</td>
-            <td>{{ talon_status_label(t) }}</td>
-            <td>{{ format_kz(t.used_at) if t.used_at else "—" }}</td>
+            <td>{{ t.contract.number if t.contract else '—' }}</td>
+            <td>{{ t.addendum_file.original_name if t.addendum_file else '—' }}</td>
+            <td>{{ t.product_name }}</td>
+            <td>{{ '%.2f'|format(t.liters or 0) }} л</td>
+            <td>{{ '%.2f'|format(left) }} л</td>
+            <td>{{ '%.2f'|format(spent) }} л</td>
+            <td>{{ t.valid_from.strftime('%d.%m.%Y') if t.valid_from else '—' }}</td>
+            <td>{{ t.valid_to.strftime('%d.%m.%Y') if t.valid_to else '—' }}</td>
+            <td>{{ status }}</td>
+            <td>{{ format_kz(t.used_at) if t.used_at else '—' }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="10" class="empty-state">Нет талонов за выбранный период.</td></tr>
+          <tr><td colspan="12" class="empty-state">Нет талонов за выбранный период.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -83,8 +147,8 @@ if (statusCtx) {
   new Chart(statusCtx, {
     type: 'doughnut',
     data: {
-      labels: ['Активные', 'Использованные', 'Другие'],
-      datasets: [{ data: [{{ active_count }}, {{ used_count }}, {{ talons|length - active_count - used_count }}] }]
+      labels: ['Активные', 'Использованные', 'Просроченные', 'Заблокированные'],
+      datasets: [{ data: [{{ active_count }}, {{ used_count }}, {{ expired_count }}, {{ blocked_count }}] }]
     },
     options: {
       maintainAspectRatio: false,

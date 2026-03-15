@@ -666,26 +666,30 @@ def talon_use(talon_id):
 def talon_extend(talon_id):
     t = Talon.query.get_or_404(talon_id)
 
-    if not has_role("director", "deputy_director"):
-        flash("Продлевать талоны может только директор или замдиректора.", "danger")
+    if not has_role("director", "deputy_director", "executor"):
+        flash("Недостаточно прав для продления талона.", "danger")
         return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
     try:
         new_valid_to = datetime.strptime(request.form.get("new_valid_to") or "", "%Y-%m-%d").date()
     except Exception:
         flash("Укажите новую дату окончания.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
 
-    if new_valid_to <= date.today():
-        flash("Новая дата должна быть больше сегодняшней.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+    today = kz_today()
+    if new_valid_to < today:
+        flash("Новая дата не может быть раньше сегодняшней.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
 
+    t.valid_from = today
     t.valid_to = new_valid_to
-    if t.state == "expired":
-        t.state = "active"
+    t.state = "active"
 
     db.session.commit()
-    notify_event("Талон продлен", f"Талон {t.serial_number} продлен до {new_valid_to} пользователем {current_user.username}")
+    notify_event(
+        "Талон продлен",
+        f"Талон {t.serial_number} продлен с {today} до {new_valid_to} пользователем {current_user.username}"
+    )
     flash("Срок действия талона продлен.", "success")
     return redirect(url_for("clients.client_talons", client_id=t.client_id, status="active"))
 

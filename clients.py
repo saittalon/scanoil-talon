@@ -50,7 +50,7 @@ def _client_tabs(client: Client):
 def balance_set(client_id):
     client = Client.query.get_or_404(client_id)
 
-    if not can_edit_contracts():
+    if not is_admin():
         flash("Недостаточно прав.", "danger")
         return redirect(url_for("clients.client_contracts", client_id=client.id))
 

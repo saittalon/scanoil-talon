@@ -864,23 +864,55 @@ def print_talons_pdf(client_id):
 def client_reports(client_id):
     client = Client.query.get_or_404(client_id)
 
-    date_from = request.args.get("date_from")
-    date_to = request.args.get("date_to")
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
 
     q = Talon.query.filter_by(client_id=client.id)
+
     if date_from:
-        q = q.filter(Talon.valid_from >= date_from)
+        try:
+            df = datetime.strptime(date_from, "%Y-%m-%d").date()
+            q = q.filter(Talon.valid_from >= df)
+        except ValueError:
+            date_from = ""
+
     if date_to:
-        q = q.filter(Talon.valid_to <= date_to)
+        try:
+            dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+            q = q.filter(Talon.valid_to <= dt)
+        except ValueError:
+            date_to = ""
 
     talons = q.order_by(Talon.id.desc()).all()
+    balances = Balance.query.filter_by(client_id=client.id).all()
+
+    active_count = sum(1 for t in talons if talon_status(t) == "active")
+    used_count = sum(1 for t in talons if talon_status(t) == "used")
+    expired_count = sum(1 for t in talons if talon_status(t) == "expired")
+    blocked_count = sum(1 for t in talons if talon_status(t) == "blocked")
+
+    total_liters = sum(float(t.liters or 0) for t in talons)
+    used_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "used")
+    active_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "active")
+    expired_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "expired")
+    balance_liters = sum(float(b.liters_left or 0) for b in balances)
 
     return render_template(
         "client_reports.html",
         client=client,
         talons=talons,
+        balances=balances,
         date_from=date_from,
         date_to=date_to,
+        active_count=active_count,
+        used_count=used_count,
+        expired_count=expired_count,
+        blocked_count=blocked_count,
+        total_liters=total_liters,
+        used_liters=used_liters,
+        active_liters=active_liters,
+        expired_liters=expired_liters,
+        balance_liters=balance_liters,
         tabs=_client_tabs(client),
         active_tab="reports",
     )

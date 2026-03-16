@@ -42,6 +42,10 @@ def can_edit_contracts():
     return has_role("director", "deputy_director", "zamdirector", "executor")
 
 
+def can_delete_talons():
+    return has_role("director", "deputy_director", "zamdirector", "executor")
+
+
 def contract_is_approved(contract):
     main_ok = any(f.kind == "contract" and f.approval_status == "approved" for f in contract.files)
     return main_ok
@@ -174,6 +178,30 @@ def _apply_talons_payload(client, payload):
         db.session.add(t)
 
 
+def _apply_talon_delete_payload(client, payload):
+    talon_id = int(payload.get("talon_id") or 0)
+    t = Talon.query.filter_by(id=talon_id, client_id=client.id).first()
+    if t is None:
+        raise ValueError("Талон не найден.")
+
+    state_before = t.effective_state
+    bal = None
+    if t.contract_id is not None:
+        bal = Balance.query.filter_by(
+            client_id=t.client_id,
+            contract_id=t.contract_id,
+            product_name=t.product_name or "ГАЗ"
+        ).first()
+        if bal is None:
+            bal = Balance.query.filter_by(client_id=t.client_id, contract_id=t.contract_id).first()
+
+    if state_before != "used" and bal is not None and bal.balance_control:
+        bal.liters_left = float(bal.liters_left or 0) + float(t.liters or 0)
+        bal.updated_at = datetime.utcnow()
+
+    db.session.delete(t)
+
+
 # ---------------- Балансы (остатки) ----------------
 @clients_bp.post("/clients/<int:client_id>/balance/set", endpoint="balance_set")
 @login_required
@@ -286,19 +314,12 @@ def list_clients():
 @clients_bp.get("/clients/new", endpoint="new_client")
 @login_required
 def client_new_get():
-    if not is_admin():
-        flash("Только админ может добавлять клиентов", "warning")
-        return redirect(url_for("clients.list_clients"))
     return render_template("client_new.html")
 
 
 @clients_bp.post("/clients/new", endpoint="new_client_post")
 @login_required
 def client_new_post():
-    if not is_admin():
-        flash("Только админ может добавлять клиентов", "warning")
-        return redirect(url_for("clients.list_clients"))
-
     name = request.form.get("name", "").strip()
     if not name:
         flash("Заполни поле: Название в системе", "danger")
@@ -619,6 +640,7 @@ def client_talons(client_id):
         active_tab="talons",
         pending_requests=pending_requests,
         can_approve_requests=can_approve_requests(),
+        can_delete_talons=can_delete_talons(),
     )
 
 
@@ -760,6 +782,8 @@ def approve_request(request_id):
             _apply_balance_payload(client, payload)
         elif req.action_type == "talons_add":
             _apply_talons_payload(client, payload)
+        elif req.action_type == "talon_delete":
+            _apply_talon_delete_payload(client, payload)
         else:
             flash("Неизвестный тип заявки.", "danger")
             return redirect(request.referrer or "/")
@@ -841,7 +865,7 @@ def talon_use(talon_id):
 def talon_extend(talon_id):
     t = Talon.query.get_or_404(talon_id)
 
-    if not has_role("director", "deputy_director", "executor"):
+    if not has_role("director", "deputy_director", "zamdirector", "executor"):
         flash("Недостаточно прав для продления талона.", "danger")
         return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
@@ -867,6 +891,51 @@ def talon_extend(talon_id):
     )
     flash("Срок действия талона продлен.", "success")
     return redirect(url_for("clients.client_talons", client_id=t.client_id, status="active"))
+
+
+@clients_bp.post("/talons/<int:talon_id>/delete")
+@login_required
+def talon_delete(talon_id):
+    t = Talon.query.get_or_404(talon_id)
+
+    if not can_delete_talons():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+
+    client_id = t.client_id
+    serial_number = t.serial_number
+    payload = {
+        "talon_id": t.id,
+        "contract_id": t.contract_id,
+        "product_name": t.product_name,
+        "liters": float(t.liters or 0),
+        "serial_number": t.serial_number,
+    }
+
+    if should_require_approval():
+        _create_approval_request(
+            action_type="talon_delete",
+            client_id=t.client_id,
+            contract_id=t.contract_id,
+            payload=payload,
+            comment="Удаление талона требует подтверждения директора или замдиректора.",
+        )
+        notify_event(
+            "Заявка на удаление талона",
+            f"Пользователь {current_user.username} отправил заявку на удаление талона {serial_number} клиента {t.client.name if t.client else client_id}"
+        )
+        flash("Заявка на удаление талона отправлена на подтверждение.", "success")
+        return redirect(url_for("clients.client_talons", client_id=client_id))
+
+    _apply_talon_delete_payload(t.client, payload)
+    db.session.commit()
+
+    notify_event(
+        "Талон удален",
+        f"Пользователь {current_user.username} удалил талон {serial_number} клиента {t.client.name if t.client else client_id}"
+    )
+    flash("Талон удален.", "success")
+    return redirect(url_for("clients.client_talons", client_id=client_id))
 
 
 # ---------------- QR ----------------

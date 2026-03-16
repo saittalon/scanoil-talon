@@ -44,7 +44,6 @@
         <div>
           <div class="hero-kicker">Карточка договора</div>
           <div class="hero-title" style="font-size:1.75rem;">{{ selected.number }}</div>
-          <div class="hero-subtitle">Договор действует с {{ selected.date_from }}{% if selected.date_to %} по {{ selected.date_to }}{% endif %}. В карточке договора доступны цена, остаток и комплект документов.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients.contract_edit_get', client_id=client.id, contract_id=selected.id) }}">Редактировать</a>
@@ -108,7 +107,6 @@
           <div class="d-flex align-items-center justify-content-between gap-2">
             <div>
               <div class="fw-semibold">📁 Дополнительные соглашения</div>
-              <div class="client-meta mt-1">Дополнительные соглашения хранятся отдельно от основного договора</div>
             </div>
             <span class="pill-stat">{{ add_files|length }}</span>
           </div>

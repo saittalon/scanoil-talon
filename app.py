@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone
 
 from flask import (
-    Flask, redirect, url_for, request, jsonify, render_template, abort
+    Flask, redirect, url_for, request, jsonify, render_template, abort, flash
 )
 from flask_login import LoginManager, login_required
 from supabase import create_client
@@ -10,8 +10,7 @@ from supabase import create_client
 from config import Config
 from models import (
     db,
-    User, Client, Contract, Balance, Talon, AGZS,
-    BotSession, TalonRedemption, WebAppToken,
+    User, Talon, BotSession, TalonRedemption, WebAppToken,
     ContractFile
 )
 from auth import auth_bp
@@ -20,12 +19,20 @@ from reports import reports_bp
 from helpers import require_roles, talon_status_label, format_kz, kz_now
 from mail_utils import send_daily_report
 from contract_files import contract_files_bp
+from security import (
+    get_csrf_token,
+    validate_csrf,
+    check_rate_limit_or_429,
+    get_client_ip,
+    log_audit,
+    verify_telegram_init_data,
+)
 
 
 ALLOWED_SITE_USERS = {
-    "Erdaulet1997": ("123456Muraz", "director"),
-    "Gulbara2002": ("123456Muraz", "zamdirector"),
-    "Erlan2003": ("123456Muraz", "executor"),
+    "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "123456Muraz"), "director"),
+    "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "123456Muraz"), "zamdirector"),
+    "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
 }
 
 
@@ -44,8 +51,9 @@ def _ensure_only_allowed_users():
             if user.role != role:
                 user.role = role
                 changed = True
-            user.set_password(password)
-            changed = True
+            if password:
+                user.set_password(password)
+                changed = True
 
     db.session.flush()
 
@@ -93,7 +101,22 @@ def create_app():
 
     @login_manager.user_loader
     def load_user(user_id):
-        return User.query.get(int(user_id))
+        return db.session.get(User, int(user_id))
+
+    @app.before_request
+    def protect_requests():
+        validate_csrf()
+        if request.path == '/tg/api/scan':
+            key = f"{get_client_ip()}:{(request.headers.get('User-Agent') or '')[:60]}"
+            limited = check_rate_limit_or_429(
+                category='tg_scan',
+                key=key,
+                limit=25,
+                window_seconds=60,
+                message='Слишком много запросов на сканирование. Подождите минуту.',
+            )
+            if limited:
+                return limited
 
     @app.context_processor
     def inject_role_label():
@@ -115,6 +138,7 @@ def create_app():
         return {
             "talon_status_label": talon_status_label,
             "format_kz": format_kz,
+            "csrf_token": get_csrf_token,
         }
 
     app.register_blueprint(auth_bp)
@@ -125,6 +149,33 @@ def create_app():
     @app.get("/")
     def home():
         return redirect(url_for("clients.list_clients"))
+
+    @app.errorhandler(400)
+    def bad_request(err):
+        if request.path.startswith('/tg/api/'):
+            return jsonify({"ok": False, "error": "bad_request", "message": getattr(err, 'description', 'bad_request')}), 400
+        flash(getattr(err, 'description', 'Некорректный запрос.'), 'danger')
+        return redirect(request.referrer or url_for('clients.list_clients'))
+
+    @app.errorhandler(413)
+    def file_too_large(_err):
+        flash('Файл слишком большой. Разрешено не более 10 МБ.', 'danger')
+        return redirect(request.referrer or url_for('clients.list_clients'))
+
+    @app.errorhandler(429)
+    def too_many_requests(err):
+        if request.path.startswith('/tg/api/'):
+            return jsonify({"ok": False, "error": "rate_limited", "message": getattr(err, 'description', 'Слишком много запросов.')}), 429
+        flash(getattr(err, 'description', 'Слишком много запросов. Подождите немного.'), 'danger')
+        return redirect(request.referrer or url_for('clients.list_clients'))
+
+    @app.errorhandler(500)
+    def internal_error(_err):
+        db.session.rollback()
+        if request.path.startswith('/tg/api/'):
+            return jsonify({"ok": False, "error": "server_error"}), 500
+        flash('Внутренняя ошибка сервера. Попробуйте ещё раз.', 'danger')
+        return redirect(request.referrer or url_for('clients.list_clients'))
 
     @app.get("/files/contracts/<int:file_id>")
     @login_required
@@ -158,6 +209,7 @@ def create_app():
     @require_roles("director", "zamdirector", "deputy_director")
     def admin_send_daily_report():
         ok = send_daily_report()
+        log_audit('send_daily_report', f'Ручная отправка отчёта: {bool(ok)}')
         return jsonify({"ok": bool(ok)})
 
     @app.get("/tg/scan")
@@ -170,9 +222,14 @@ def create_app():
         data = request.get_json(silent=True) or {}
         token = (data.get("token") or "").strip()
         code = (data.get("code") or "").strip()
+        init_data = (data.get("initData") or "").strip()
 
         if not token or not code:
             return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
+
+        ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())
+        if not ok:
+            return jsonify({"ok": False, "error": "invalid_telegram_context", "reason": reason}), 401
 
         t = WebAppToken.query.filter_by(token=token).first()
         if t is None:
@@ -191,6 +248,10 @@ def create_app():
             if expires_at < now_naive_utc:
                 return jsonify({"ok": False, "error": "token_expired"}), 401
 
+        tg_user_id = str((tg_user or {}).get('id') or '')
+        if not tg_user_id or tg_user_id != str(t.telegram_user_id):
+            return jsonify({"ok": False, "error": "telegram_user_mismatch"}), 401
+
         sess = BotSession.query.filter_by(
             telegram_user_id=t.telegram_user_id,
             is_active=True
@@ -199,7 +260,7 @@ def create_app():
         if sess is None:
             return jsonify({"ok": False, "error": "not_logged_in"}), 401
 
-        talon = Talon.query.filter_by(code=code).first()
+        talon = Talon.query.filter_by(code=code).with_for_update().first()
         if talon is None:
             return jsonify({"ok": False, "error": "talon_not_found"}), 404
 
@@ -223,6 +284,9 @@ def create_app():
                 "agzs": last.agzs.name if last and last.agzs else None,
             }), 409
 
+        if getattr(talon, 'state', None) == 'blocked' or (talon.valid_from and talon.valid_from > kz_now().date()):
+            return jsonify({"ok": False, "error": "not_active"}), 409
+
         talon.state = "used"
         talon.used_at = kz_now()
         talon.used_agzs_id = sess.agzs_id
@@ -237,6 +301,7 @@ def create_app():
         )
 
         db.session.add(red)
+        log_audit('telegram_scan_success', f'Талон {talon.serial_number} использован через Telegram WebApp', 'talon', talon.id)
         db.session.commit()
 
         return jsonify({

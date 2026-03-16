@@ -1,5 +1,6 @@
 import os
 import json
+import secrets
 from datetime import datetime, timedelta, date
 from io import BytesIO
 
@@ -14,10 +15,11 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from models import db, Client, Contract, Balance, Talon, ContractFile
+from models import db, Client, Contract, Balance, Talon, ContractFile, TalonRedemption
 from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz, kz_today, kz_now
 from reports import dashboard_month_links
 from mail_utils import notify_event
+from security import log_audit
 
 clients_bp = Blueprint("clients", __name__)
 
@@ -116,6 +118,7 @@ def balance_set(client_id):
         bal.balance_control = balance_control
         bal.updated_at = datetime.utcnow()
 
+    log_audit("balance_set", f"{current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}", "client", client.id)
     db.session.commit()
     notify_event(
         "Обновлен остаток",
@@ -141,11 +144,14 @@ def list_clients():
             )
         )
 
-    clients = query.order_by(Client.id.desc()).all()
+    page = request.args.get("page", 1, type=int)
+    pagination = query.order_by(Client.id.desc()).paginate(page=page, per_page=50, error_out=False)
+    clients = pagination.items
 
     return render_template(
         "clients.html",
         clients=clients,
+        pagination=pagination,
         is_admin=is_admin(),
         current_role=current_user.role,
         search_query=q,
@@ -190,6 +196,7 @@ def client_new_post():
         comment=request.form.get("comment") or None,
     )
     db.session.add(c)
+    log_audit("create_client", f"{current_user.username} создал клиента {name}", "client", c.id)
     db.session.commit()
 
     notify_event("Создан новый клиент", f"Пользователь {current_user.username} создал клиента: {c.name}")
@@ -214,6 +221,7 @@ def delete_client_post():
     Talon.query.filter_by(client_id=c.id).delete()
     Balance.query.filter_by(client_id=c.id).delete()
     Contract.query.filter_by(client_id=c.id).delete()
+    log_audit("delete_client", f"{current_user.username} удалил клиента {c.name}", "client", c.id)
     db.session.delete(c)
     db.session.commit()
 
@@ -325,6 +333,7 @@ def contract_new_post(client_id):
         forbidden_groups=(request.form.get("forbidden_groups") or "").strip() or None,
     )
     db.session.add(contract)
+    log_audit("create_contract", f"{current_user.username} создал договор {number} клиента {client.name}", "contract", contract.id)
     db.session.commit()
 
     notify_event(
@@ -398,6 +407,7 @@ def contract_edit_post(client_id, contract_id):
     contract.allow_all_stations = bool(request.form.get("allow_all_stations"))
     contract.forbidden_groups = (request.form.get("forbidden_groups") or "").strip() or None
 
+    log_audit("update_contract", f"{current_user.username} обновил договор {contract.number} клиента {client.name}", "contract", contract.id)
     db.session.commit()
     notify_event(
         "Договор обновлен",
@@ -443,7 +453,9 @@ def client_talons(client_id):
         status = "active"
         q = q.filter(Talon.state == "active", Talon.valid_to >= today)
 
-    talons = q.order_by(Talon.id.desc()).all()
+    page = request.args.get("page", 1, type=int)
+    pagination = q.order_by(Talon.id.desc()).paginate(page=page, per_page=100, error_out=False)
+    talons = pagination.items
 
     grouped_talons = []
     grouped_index = {}
@@ -503,6 +515,7 @@ def client_talons(client_id):
         status=status,
         tabs=_client_tabs(client),
         active_tab="talons",
+        pagination=pagination,
     )
 
 
@@ -607,18 +620,19 @@ def client_talons_add(client_id):
     except Exception:
         base_serial = Talon.query.filter_by(client_id=client.id).count() + 1
 
-    numeric_codes = []
-    for row in db.session.query(Talon.code).all():
-        try:
-            numeric_codes.append(int(str(row[0]).strip()))
-        except Exception:
-            continue
+    existing_codes = set(row[0] for row in db.session.query(Talon.code).all())
 
-    base_code = (max(numeric_codes) + 1) if numeric_codes else 1000000001
+    def generate_unique_code():
+        for _ in range(100):
+            code_candidate = ''.join(str(secrets.randbelow(10)) for _ in range(12))
+            if code_candidate not in existing_codes:
+                existing_codes.add(code_candidate)
+                return code_candidate
+        raise RuntimeError("Не удалось сгенерировать уникальный код талона")
 
     for i in range(qty):
         serial_number = str(base_serial + i).zfill(5)
-        code = str(base_code + i)
+        code = generate_unique_code()
 
         t = Talon(
             client_id=client.id,
@@ -635,6 +649,7 @@ def client_talons_add(client_id):
         )
         db.session.add(t)
 
+    log_audit("create_talons", f"{current_user.username} создал {qty} талонов для клиента {client.name}", "client", client.id)
     db.session.commit()
     notify_event(
         "Созданы талоны",
@@ -655,7 +670,7 @@ def client_talons_add(client_id):
 @clients_bp.post("/talons/<int:talon_id>/use")
 @login_required
 def talon_use(talon_id):
-    t = Talon.query.get_or_404(talon_id)
+    t = Talon.query.filter_by(id=talon_id).with_for_update().first_or_404()
     status = talon_status(t)
 
     if status == "expired":
@@ -671,6 +686,7 @@ def talon_use(talon_id):
     t.state = "used"
     t.used_at = kz_now()
     t.used_by_user_id = current_user.id
+    log_audit("use_talon", f"{current_user.username} использовал талон {t.serial_number}", "talon", t.id)
     db.session.commit()
 
     notify_event(
@@ -706,6 +722,7 @@ def talon_extend(talon_id):
     t.valid_to = new_valid_to
     t.state = "active"
 
+    log_audit("extend_talon", f"{current_user.username} продлил талон {t.serial_number} до {new_valid_to}", "talon", t.id)
     db.session.commit()
     notify_event(
         "Талон продлен",
@@ -738,6 +755,7 @@ def talon_delete(talon_id):
             bal.updated_at = datetime.utcnow()
 
     client_id = t.client_id
+    log_audit("delete_talon", f"{current_user.username} удалил талон {t.serial_number}", "talon", t.id)
     db.session.delete(t)
     db.session.commit()
     flash("Талон удалён.", "success")

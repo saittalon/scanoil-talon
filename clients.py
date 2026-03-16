@@ -14,7 +14,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from models import db, Client, Contract, Balance, Talon, ContractFile
+from models import db, Client, Contract, Balance, Talon, ContractFile, ApprovalRequest
 from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz, kz_today, kz_now
 from reports import dashboard_month_links
 from mail_utils import notify_event
@@ -23,15 +23,23 @@ clients_bp = Blueprint("clients", __name__)
 
 
 def is_admin():
-    return has_role("director", "deputy_director")
+    return has_role("director", "deputy_director", "zamdirector")
+
+
+def can_approve_requests():
+    return has_role("director", "deputy_director", "zamdirector")
+
+
+def should_require_approval():
+    return has_role("executor")
 
 
 def can_edit_balances():
-    return has_role("director", "deputy_director", "executor")
+    return has_role("director", "deputy_director", "zamdirector", "executor")
 
 
 def can_edit_contracts():
-    return has_role("director", "deputy_director", "executor")
+    return has_role("director", "deputy_director", "zamdirector", "executor")
 
 
 def contract_is_approved(contract):
@@ -46,6 +54,124 @@ def _client_tabs(client: Client):
         "contract": url_for("clients.client_contracts", client_id=client.id),
         "reports": url_for("clients.client_reports", client_id=client.id),
     }
+
+
+def _pending_requests_for_client(client_id, contract_id=None):
+    q = ApprovalRequest.query.filter_by(client_id=client_id).order_by(ApprovalRequest.id.desc())
+    if contract_id is not None:
+        q = q.filter((ApprovalRequest.contract_id == contract_id) | (ApprovalRequest.contract_id.is_(None)))
+    return q.all()
+
+
+def _create_approval_request(action_type, client_id, contract_id, payload, comment=None):
+    req = ApprovalRequest(
+        action_type=action_type,
+        client_id=client_id,
+        contract_id=contract_id,
+        payload_json=json.dumps(payload, ensure_ascii=False),
+        status="pending",
+        created_by_user_id=current_user.id,
+        comment=comment,
+    )
+    db.session.add(req)
+    db.session.commit()
+    return req
+
+
+def _apply_balance_payload(client, payload):
+    contract_id = payload.get("contract_id")
+    product_name = (payload.get("product_name") or "ГАЗ").strip() or "ГАЗ"
+    liters_left = float(payload.get("liters_left") or 0)
+    balance_control = bool(payload.get("balance_control"))
+
+    bal = Balance.query.filter_by(
+        client_id=client.id,
+        contract_id=contract_id,
+        product_name=product_name,
+    ).first()
+
+    if bal is None:
+        bal = Balance(
+            client_id=client.id,
+            contract_id=contract_id,
+            product_name=product_name,
+            liters_left=liters_left,
+            balance_control=balance_control,
+            updated_at=datetime.utcnow(),
+        )
+        db.session.add(bal)
+    else:
+        bal.liters_left = liters_left
+        bal.balance_control = balance_control
+        bal.updated_at = datetime.utcnow()
+
+
+def _apply_talons_payload(client, payload):
+    contract_id = payload.get("contract_id")
+    addendum_file_id = payload.get("addendum_file_id")
+    product_name = (payload.get("product_name") or "ГАЗ").strip() or "ГАЗ"
+    liters = float(payload.get("liters") or 0)
+    qty = int(payload.get("qty") or 1)
+    valid_from = datetime.strptime(payload.get("valid_from"), "%Y-%m-%d").date()
+    valid_to = datetime.strptime(payload.get("valid_to"), "%Y-%m-%d").date()
+
+    need = qty * liters
+    bal = None
+    if contract_id is not None:
+        bal = Balance.query.filter_by(
+            client_id=client.id,
+            contract_id=contract_id,
+            product_name=product_name
+        ).first()
+        if bal is None:
+            bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id).first()
+
+    if bal is not None and bal.balance_control:
+        left = float(bal.liters_left or 0)
+        if need > left + 1e-9:
+            raise ValueError(f"Недостаточно остатка по договору: доступно {left:.2f} л, нужно {need:.2f} л.")
+        bal.liters_left = left - need
+        bal.updated_at = datetime.utcnow()
+
+    last_serial = (
+        db.session.query(Talon.serial_number)
+        .filter(Talon.client_id == client.id)
+        .order_by(Talon.id.desc())
+        .first()
+    )
+
+    try:
+        base_serial = int(last_serial[0]) + 1 if last_serial and str(last_serial[0]).isdigit() else 1
+    except Exception:
+        base_serial = Talon.query.filter_by(client_id=client.id).count() + 1
+
+    numeric_codes = []
+    for row in db.session.query(Talon.code).all():
+        try:
+            numeric_codes.append(int(str(row[0]).strip()))
+        except Exception:
+            continue
+
+    base_code = (max(numeric_codes) + 1) if numeric_codes else 1000000001
+
+    for i in range(qty):
+        serial_number = str(base_serial + i).zfill(5)
+        code = str(base_code + i)
+
+        t = Talon(
+            client_id=client.id,
+            contract_id=contract_id,
+            holder_name=client.name,
+            product_name=product_name,
+            liters=liters,
+            serial_number=serial_number,
+            code=code,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            state="active",
+            addendum_file_id=addendum_file_id,
+        )
+        db.session.add(t)
 
 
 # ---------------- Балансы (остатки) ----------------
@@ -95,27 +221,30 @@ def balance_set(client_id):
             flash("Выбранное доп. соглашение не подтверждено.", "danger")
             return redirect(url_for("clients.client_talons", client_id=client.id))
 
-    bal = Balance.query.filter_by(
-        client_id=client.id,
-        contract_id=contract_id,
-        product_name=product_name,
-    ).first()
+    payload = {
+        "contract_id": contract_id,
+        "product_name": product_name,
+        "liters_left": liters_left,
+        "balance_control": balance_control,
+        "addendum_file_id": addendum_file_id,
+    }
 
-    if bal is None:
-        bal = Balance(
+    if should_require_approval():
+        _create_approval_request(
+            action_type="balance_set",
             client_id=client.id,
             contract_id=contract_id,
-            product_name=product_name,
-            liters_left=liters_left,
-            balance_control=balance_control,
-            updated_at=datetime.utcnow(),
+            payload=payload,
+            comment="Изменение остатка требует подтверждения директора или замдиректора.",
         )
-        db.session.add(bal)
-    else:
-        bal.liters_left = liters_left
-        bal.balance_control = balance_control
-        bal.updated_at = datetime.utcnow()
+        notify_event(
+            "Заявка на изменение остатка",
+            f"Пользователь {current_user.username} отправил заявку на изменение остатка по договору {contract.number} клиента {client.name}"
+        )
+        flash("Заявка на изменение остатка отправлена на подтверждение.", "success")
+        return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
+    _apply_balance_payload(client, payload)
     db.session.commit()
     notify_event(
         "Обновлен остаток",
@@ -250,6 +379,8 @@ def client_contracts(client_id):
         except ValueError:
             selected = None
 
+    pending_requests = _pending_requests_for_client(client.id, selected.id if selected else None)
+
     return render_template(
         "client_contracts.html",
         client=client,
@@ -259,6 +390,8 @@ def client_contracts(client_id):
         active_tab="contract",
         timedelta=timedelta,
         current_role=current_user.role,
+        pending_requests=pending_requests,
+        can_approve_requests=can_approve_requests(),
     )
 
 
@@ -470,6 +603,8 @@ def client_talons(client_id):
             "product_name": b.product_name,
         }
 
+    pending_requests = _pending_requests_for_client(client.id)
+
     return render_template(
         "client_talons.html",
         client=client,
@@ -482,6 +617,8 @@ def client_talons(client_id):
         status=status,
         tabs=_client_tabs(client),
         active_tab="talons",
+        pending_requests=pending_requests,
+        can_approve_requests=can_approve_requests(),
     )
 
 
@@ -554,72 +691,43 @@ def client_talons_add(client_id):
         flash("Дата окончания не может быть раньше даты начала.", "danger")
         return redirect(url_for("clients.client_talons", client_id=client.id))
 
-    need = qty * liters
-    bal = None
-
-    if contract_id is not None:
-        bal = Balance.query.filter_by(
-            client_id=client.id,
-            contract_id=contract_id,
-            product_name=product_name
-        ).first()
-        if bal is None:
-            bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id).first()
-
-    if bal is not None and bal.balance_control:
-        left = float(bal.liters_left or 0)
-        if need > left + 1e-9:
-            flash(f"Недостаточно остатка по договору: доступно {left:.2f} л, нужно {need:.2f} л.", "danger")
-            return redirect(url_for("clients.client_talons", client_id=client.id))
-        bal.liters_left = left - need
-        bal.updated_at = datetime.utcnow()
-
-    last_serial = (
-        db.session.query(Talon.serial_number)
-        .filter(Talon.client_id == client.id)
-        .order_by(Talon.id.desc())
-        .first()
-    )
+    payload = {
+        "contract_id": contract_id,
+        "addendum_file_id": addendum_file_id,
+        "product_name": product_name,
+        "liters": liters,
+        "qty": qty,
+        "valid_from": valid_from.isoformat(),
+        "valid_to": valid_to.isoformat(),
+    }
 
     try:
-        base_serial = int(last_serial[0]) + 1 if last_serial and str(last_serial[0]).isdigit() else 1
-    except Exception:
-        base_serial = Talon.query.filter_by(client_id=client.id).count() + 1
-
-    numeric_codes = []
-    for row in db.session.query(Talon.code).all():
-        try:
-            numeric_codes.append(int(str(row[0]).strip()))
-        except Exception:
-            continue
-
-    base_code = (max(numeric_codes) + 1) if numeric_codes else 1000000001
-
-    for i in range(qty):
-        serial_number = str(base_serial + i).zfill(5)
-        code = str(base_code + i)
-
-        t = Talon(
-            client_id=client.id,
-            contract_id=contract_id,
-            holder_name=client.name,
-            product_name=product_name,
-            liters=liters,
-            serial_number=serial_number,
-            code=code,
-            valid_from=valid_from,
-            valid_to=valid_to,
-            state="active",
-            addendum_file_id=addendum_file_id,
-        )
-        db.session.add(t)
-
-    db.session.commit()
-    notify_event(
-        "Созданы талоны",
-        f"Пользователь {current_user.username} создал {qty} талонов для клиента {client.name} по договору {contract.number}"
-    )
-    flash(f"Создано талонов: {qty}", "success")
+        _apply_talons_payload(client, payload)
+        if should_require_approval():
+            db.session.rollback()
+            _create_approval_request(
+                action_type="talons_add",
+                client_id=client.id,
+                contract_id=contract_id,
+                payload=payload,
+                comment="Создание талонов требует подтверждения директора или замдиректора.",
+            )
+            notify_event(
+                "Заявка на создание талонов",
+                f"Пользователь {current_user.username} отправил заявку на создание {qty} талонов для клиента {client.name} по договору {contract.number}"
+            )
+            flash("Заявка на создание талонов отправлена на подтверждение.", "success")
+        else:
+            db.session.commit()
+            notify_event(
+                "Созданы талоны",
+                f"Пользователь {current_user.username} создал {qty} талонов для клиента {client.name} по договору {contract.number}"
+            )
+            flash(f"Создано талонов: {qty}", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
 
     return redirect(url_for(
         "clients.client_talons",
@@ -628,6 +736,73 @@ def client_talons_add(client_id):
         date_to=valid_to.isoformat() if valid_to else None,
         status="active",
     ))
+
+
+
+
+@clients_bp.post("/approvals/<int:request_id>/approve")
+@login_required
+def approve_request(request_id):
+    if not can_approve_requests():
+        flash("Подтверждать может только директор или замдиректора.", "danger")
+        return redirect(request.referrer or "/")
+
+    req = ApprovalRequest.query.get_or_404(request_id)
+    if req.status != "pending":
+        flash("Эта заявка уже обработана.", "warning")
+        return redirect(request.referrer or "/")
+
+    client = Client.query.get_or_404(req.client_id)
+    payload = json.loads(req.payload_json or "{}")
+
+    try:
+        if req.action_type == "balance_set":
+            _apply_balance_payload(client, payload)
+        elif req.action_type == "talons_add":
+            _apply_talons_payload(client, payload)
+        else:
+            flash("Неизвестный тип заявки.", "danger")
+            return redirect(request.referrer or "/")
+
+        req.status = "approved"
+        req.approved_by_user_id = current_user.id
+        req.approved_at = datetime.utcnow()
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(request.referrer or "/")
+
+    notify_event(
+        "Заявка подтверждена",
+        f"Пользователь {current_user.username} подтвердил заявку #{req.id} ({req.action_type}) по клиенту {client.name}"
+    )
+    flash("Заявка подтверждена.", "success")
+    return redirect(request.referrer or "/")
+
+
+@clients_bp.post("/approvals/<int:request_id>/reject")
+@login_required
+def reject_request(request_id):
+    if not can_approve_requests():
+        flash("Отклонять может только директор или замдиректора.", "danger")
+        return redirect(request.referrer or "/")
+
+    req = ApprovalRequest.query.get_or_404(request_id)
+    if req.status != "pending":
+        flash("Эта заявка уже обработана.", "warning")
+        return redirect(request.referrer or "/")
+
+    req.status = "rejected"
+    req.approved_by_user_id = current_user.id
+    req.approved_at = datetime.utcnow()
+    db.session.commit()
+    notify_event(
+        "Заявка отклонена",
+        f"Пользователь {current_user.username} отклонил заявку #{req.id} ({req.action_type})"
+    )
+    flash("Заявка отклонена.", "success")
+    return redirect(request.referrer or "/")
 
 
 # ---------------- Использовать талон ----------------

@@ -12,7 +12,7 @@ from models import (
     db,
     User, Client, Contract, Balance, Talon, AGZS,
     BotSession, TalonRedemption, WebAppToken,
-    ContractFile
+    ContractFile, ApprovalRequest
 )
 from auth import auth_bp
 from clients import clients_bp
@@ -65,6 +65,16 @@ def _ensure_only_allowed_users():
 
         ContractFile.query.filter(ContractFile.approved_by_user_id.in_(extra_ids)).update(
             {ContractFile.approved_by_user_id: None},
+            synchronize_session=False
+        )
+
+        ApprovalRequest.query.filter(ApprovalRequest.created_by_user_id.in_(extra_ids)).update(
+            {ApprovalRequest.created_by_user_id: None},
+            synchronize_session=False
+        )
+
+        ApprovalRequest.query.filter(ApprovalRequest.approved_by_user_id.in_(extra_ids)).update(
+            {ApprovalRequest.approved_by_user_id: None},
             synchronize_session=False
         )
 

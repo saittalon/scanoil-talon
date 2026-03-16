@@ -5,8 +5,12 @@
     <h2 class="mb-1">Журнал действий</h2>
     <div class="text-muted">Последние действия пользователей и системные события</div>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 flex-wrap">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin_backup_download') }}">Скачать backup</a>
+    <form method="post" action="{{ url_for('admin_backup_upload_cloud') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-brand" type="submit">Загрузить backup в облако</button>
+    </form>
   </div>
 </div>
 <form class="card card-body mb-3" method="get">
@@ -17,6 +21,10 @@
     <div class="col-md-3 d-grid"><button class="btn btn-brand">Фильтр</button></div>
   </div>
 </form>
+<div class="alert alert-info">
+  <strong>Автобэкап:</strong> {% if cloud_backup_enabled %}включён{% else %}выключен{% endif %}.
+  {% if cloud_backup_enabled %}Архивы будут загружаться в bucket <strong>{{ cloud_backup_bucket }}</strong>.{% endif %}
+</div>
 <div class="card">
   <div class="table-responsive">
     <table class="table table-sm align-middle mb-0">

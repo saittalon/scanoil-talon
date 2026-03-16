@@ -281,30 +281,150 @@ def client_report_excel(client_id: int):
 def all_clients_report_excel():
     start, end, date_from, date_to, month = _resolve_period()
     q = _filter_talons(Talon.query, start, end)
-    talons = q.order_by(Talon.created_at.desc()).all()
-    rows = []
+    talons = q.order_by(Talon.id.asc()).all()
+    balances = Balance.query.order_by(Balance.updated_at.desc()).all()
+
+    total_count = len(talons)
+    active_count = sum(1 for t in talons if t.effective_state == 'active')
+    used_count = sum(1 for t in talons if t.effective_state == 'used')
+    expired_count = sum(1 for t in talons if t.effective_state == 'expired')
+    blocked_count = sum(1 for t in talons if t.effective_state == 'blocked')
+
+    total_liters = sum(float(t.liters or 0) for t in talons)
+    active_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'active')
+    used_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'used')
+    expired_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'expired')
+    blocked_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'blocked')
+    balance_liters = sum(float(b.liters_left or 0) for b in balances)
+
+    detail_rows = []
+    client_summary = {}
+    addendum_summary = {}
+
     for t in talons:
         contract = t.contract
-        price = contract.price_per_liter if (contract and contract.price_per_liter is not None) else 0.0
-        rows.append({
-            'Клиент': t.client.name if t.client else '',
+        client_name = t.client.name if t.client else ''
+        holder_name = t.holder_name or client_name
+        price = float(contract.price_per_liter or 0) if (contract and contract.price_per_liter is not None) else 0.0
+        addendum = t.addendum_file.original_name if getattr(t, 'addendum_file', None) else '— без доп. соглашения —'
+        left, spent = _talon_left_and_spent(t)
+        cost = float(t.liters or 0) * price
+
+        detail_rows.append({
+            '№': t.serial_number,
+            'Клиент': client_name,
+            'Держатель': holder_name,
             'Договор': contract.number if contract else '',
-            '№ талона': t.serial_number,
-            'Код': t.code,
+            'Доп. соглашение': addendum,
+            'Товар': t.product_name,
+            'Номинал': float(t.liters or 0),
+            'Остаток': left,
+            'Списано': spent,
+            'С': t.valid_from.strftime('%d.%m.%Y') if t.valid_from else '',
+            'По': t.valid_to.strftime('%d.%m.%Y') if t.valid_to else '',
             'Статус': talon_status_label(t),
             'Дата использования': format_kz(t.used_at, '%d.%m.%Y') if t.used_at else '',
             'Время использования': format_kz(t.used_at, '%H:%M') if t.used_at else '',
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
-            'Услуга': t.product_name,
-            'Количество': float(t.liters or 0),
-            'Цена': float(price),
-            'Стоимость': float(t.liters or 0) * float(price),
-            'Доп. соглашение': t.addendum_file.original_name if getattr(t, 'addendum_file', None) else '',
+            'Талон': t.code,
+            'Цена': price,
+            'Стоимость': cost,
         })
-    df = pd.DataFrame(rows)
+
+        c_bucket = client_summary.setdefault(client_name, {
+            'Клиент': client_name,
+            'Талонов': 0,
+            'Всего литров': 0.0,
+            'Активные литры': 0.0,
+            'Использованные литры': 0.0,
+            'Просроченные литры': 0.0,
+            'Заблокировано': 0.0,
+            'Сумма': 0.0,
+        })
+        c_bucket['Талонов'] += 1
+        c_bucket['Всего литров'] += float(t.liters or 0)
+        c_bucket['Сумма'] += cost
+        if t.effective_state == 'used':
+            c_bucket['Использованные литры'] += float(t.liters or 0)
+        elif t.effective_state == 'expired':
+            c_bucket['Просроченные литры'] += float(t.liters or 0)
+        elif t.effective_state == 'blocked':
+            c_bucket['Заблокировано'] += float(t.liters or 0)
+        else:
+            c_bucket['Активные литры'] += float(t.liters or 0)
+
+        a_bucket = addendum_summary.setdefault(addendum, {
+            'Доп. соглашение': addendum,
+            'Талонов': 0,
+            'Всего литров': 0.0,
+            'Остаток литров': 0.0,
+            'Списано литров': 0.0,
+            'Сумма': 0.0,
+        })
+        a_bucket['Талонов'] += 1
+        a_bucket['Всего литров'] += float(t.liters or 0)
+        a_bucket['Остаток литров'] += left
+        a_bucket['Списано литров'] += spent
+        a_bucket['Сумма'] += cost
+
+    detail_rows = sorted(detail_rows, key=lambda r: (str(r.get('Клиент') or ''), str(r.get('Доп. соглашение') or ''), str(r.get('№') or '')))
+    summary_df = pd.DataFrame([
+        {'Показатель': 'Период (от)', 'Значение': date_from or '—'},
+        {'Показатель': 'Период (до)', 'Значение': date_to or '—'},
+        {'Показатель': 'Всего талонов', 'Значение': total_count},
+        {'Показатель': 'Активные талоны', 'Значение': active_count},
+        {'Показатель': 'Использованные талоны', 'Значение': used_count},
+        {'Показатель': 'Просроченные талоны', 'Значение': expired_count},
+        {'Показатель': 'Заблокированные талоны', 'Значение': blocked_count},
+        {'Показатель': 'Всего литров', 'Значение': total_liters},
+        {'Показатель': 'Активный объём, л', 'Значение': active_liters},
+        {'Показатель': 'Использовано литров', 'Значение': used_liters},
+        {'Показатель': 'Просрочено литров', 'Значение': expired_liters},
+        {'Показатель': 'Заблокировано литров', 'Значение': blocked_liters},
+        {'Показатель': 'Клиентов в отчёте', 'Значение': len(client_summary)},
+        {'Показатель': 'Осталось газа по договорам, л', 'Значение': balance_liters},
+    ])
+    client_summary_df = pd.DataFrame(sorted(client_summary.values(), key=lambda r: str(r.get('Клиент') or '')))
+    addendum_df = pd.DataFrame(sorted(addendum_summary.values(), key=lambda r: str(r.get('Доп. соглашение') or '')))
+    balance_df = pd.DataFrame([{
+        'Клиент': b.client.name if b.client else '',
+        'Договор': b.contract.number if b.contract else '—',
+        'Товар': b.product_name,
+        'Остаток': float(b.liters_left or 0),
+        'Контроль': 'Да' if b.balance_control else 'Нет',
+        'Обновлено': format_kz(b.updated_at, '%d.%m.%Y %H:%M') if b.updated_at else '',
+    } for b in balances])
+    detail_df = pd.DataFrame(detail_rows)
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='scanoilcard_report')
+        sheet_name = 'all_clients_report'
+        summary_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=1)
+        client_start = len(summary_df) + 5
+        client_summary_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=client_start)
+        addendum_start = client_start + len(client_summary_df) + 4
+        addendum_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=addendum_start)
+        balance_start = addendum_start + len(addendum_df) + 4
+        balance_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=balance_start)
+        detail_start = balance_start + len(balance_df) + 4
+        detail_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=detail_start)
+
+        ws = writer.sheets[sheet_name]
+        ws['A1'] = 'Сводка по всем клиентам'
+        ws[f'A{client_start + 1}'] = 'Сводка по клиентам'
+        ws[f'A{addendum_start + 1}'] = 'Сводка по доп. соглашениям'
+        ws[f'A{balance_start + 1}'] = 'Остатки по договорам'
+        ws[f'A{detail_start + 1}'] = 'Детальный отчёт'
+
+        widths = {
+            'A': 16, 'B': 20, 'C': 18, 'D': 16, 'E': 24, 'F': 14, 'G': 14, 'H': 14,
+            'I': 12, 'J': 12, 'K': 14, 'L': 18, 'M': 18, 'N': 14, 'O': 16, 'P': 20,
+            'Q': 12, 'R': 14,
+        }
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+        ws.freeze_panes = f'A{detail_start + 2}'
+
     output.seek(0)
     suffix = month or (f'{date_from}_{date_to}' if date_from or date_to else 'all')
     suffix = suffix.replace(':', '-').replace('/', '-')

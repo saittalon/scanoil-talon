@@ -30,7 +30,7 @@
         {% for req in pending_requests[:5] %}
         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
           <div>
-            <strong>#{{ req.id }}</strong> — {{ 'Изменение остатка' if req.action_type == 'balance_set' else 'Создание талонов' }}
+            <strong>#{{ req.id }}</strong> — {{ 'Изменение остатка' if req.action_type == 'balance_set' else ('Удаление талона' if req.action_type == 'talon_delete' else 'Создание талонов') }}
             <span class="text-muted">• {{ req.created_by.username if req.created_by else '—' }}</span>
             {% if req.status == 'pending' %}<span class="badge text-bg-warning ms-2">Ожидает подтверждения</span>
             {% elif req.status == 'approved' %}<span class="badge text-bg-success ms-2">Подтверждена</span>
@@ -108,18 +108,23 @@
               {% endif %}
             </td>
             <td class="text-end">
-              {% if t.effective_state == 'active' %}
-                <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
-                  <button class="btn btn-outline-primary btn-sm">Использовать</button>
-                </form>
-              {% elif t.effective_state == "expired" %}
-                <form method="post" action="{{ url_for('clients.talon_extend', talon_id=t.id) }}" style="display:inline" class="d-flex gap-2 align-items-center">
-                  <input type="date" class="form-control form-control-sm" name="new_valid_to" required>
-                  <button class="btn btn-outline-warning btn-sm">Продлить</button>
-                </form>
-              {% else %}
-                <span class="text-muted small">—</span>
-              {% endif %}
+              <div class="d-flex justify-content-end gap-2 flex-wrap">
+                {% if t.effective_state == 'active' %}
+                  <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
+                    <button class="btn btn-outline-primary btn-sm">Использовать</button>
+                  </form>
+                {% elif t.effective_state == "expired" %}
+                  <span class="text-muted small">—</span>
+                {% else %}
+                  <span class="text-muted small">—</span>
+                {% endif %}
+
+                {% if can_delete_talons %}
+                  <form method="post" action="{{ url_for('clients.talon_delete', talon_id=t.id) }}" style="display:inline" onsubmit="return confirm('Удалить талон?');">
+                    <button class="btn btn-outline-danger btn-sm">{{ 'На согласование' if current_role == 'executor' else 'Удалить' }}</button>
+                  </form>
+                {% endif %}
+              </div>
             </td>
           </tr>
           {% else %}
@@ -197,7 +202,7 @@
               <select class="form-select" id="addendumSelect" name="addendum_file_id">
                 <option value="">— без доп. соглашения —</option>
               </select>
-              <div class="form-text">Каждый объем можно привязать к подтвержденному доп. соглашению.</div>
+              
             </div>
           </div>
 

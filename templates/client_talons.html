@@ -22,7 +22,7 @@
       </form>
     </div>
 
-        <div class="mt-3 d-flex gap-2 flex-wrap">
+    <div class="mt-3 d-flex gap-2 flex-wrap">
       <a href="{{ url_for('clients.client_talons', client_id=client.id, status='active', date_from=date_from, date_to=date_to) }}"
          class="btn btn-sm {% if status == 'active' %}btn-primary{% else %}btn-outline-primary{% endif %}">
         Активные
@@ -39,17 +39,19 @@
       </a>
     </div>
 
-    <div class="mt-3 d-flex flex-column gap-3">
-      {% for group in talon_groups %}
+    <div class="mt-3 d-grid gap-3">
+      {% for group in grouped_talons %}
       <div class="card border-0 shadow-sm">
         <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
+          <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-3">
             <div>
               <div class="fw-semibold">📁 {{ group.title }}</div>
-              <div class="text-muted small">Талонов: {{ group.count }} • Объём: {{ '%.2f'|format(group.liters) }} л</div>
+              <div class="text-muted small">Талонов: {{ group.talons|length }} • Объём: {{ '%.2f'|format(group.total_liters) }} л</div>
+              <div class="mt-2"><button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#group-{{ group.id }}">Открыть</button></div>
             </div>
           </div>
-          <div class="table-responsive">
+
+          <div class="collapse" id="group-{{ group.id }}"><div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
               <thead>
                 <tr>
@@ -90,18 +92,20 @@
                     {% endif %}
                   </td>
                   <td class="text-end">
-                    <div class="d-flex justify-content-end gap-2 flex-wrap">
+                    <div class="d-flex gap-2 justify-content-end flex-wrap">
                       {% if t.effective_state == 'active' %}
                         <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
                           <button class="btn btn-outline-primary btn-sm">Использовать</button>
                         </form>
-                      {% else %}
-                        <span class="text-muted small">—</span>
+                      {% elif t.effective_state == "expired" %}
+                        <form method="post" action="{{ url_for('clients.talon_extend', talon_id=t.id) }}" style="display:inline" class="d-flex gap-2 align-items-center">
+                          <input type="date" class="form-control form-control-sm" name="new_valid_to" required>
+                          <button class="btn btn-outline-warning btn-sm">Продлить</button>
+                        </form>
                       {% endif %}
-
-                      {% if can_delete_talons %}
+                      {% if t.effective_state != 'used' %}
                         <form method="post" action="{{ url_for('clients.talon_delete', talon_id=t.id) }}" style="display:inline" onsubmit="return confirm('Удалить талон?');">
-                          <button class="btn btn-outline-danger btn-sm">{{ 'На согласование' if current_role == 'executor' else 'Удалить' }}</button>
+                          <button class="btn btn-outline-danger btn-sm">Удалить</button>
                         </form>
                       {% endif %}
                     </div>
@@ -110,13 +114,14 @@
                 {% endfor %}
               </tbody>
             </table>
-          </div>
+          </div></div>
         </div>
       </div>
       {% else %}
       <div class="text-center text-muted py-4">Талоны не найдены</div>
       {% endfor %}
-    </div>  </div>
+    </div>
+  </div>
 </div>
 
 <div class="modal fade" id="addTalonsModal" tabindex="-1" aria-hidden="true">
@@ -134,7 +139,7 @@
               <label class="form-label">Договор</label>
               {% if contracts|length == 0 %}
                 <div class="alert alert-warning mb-0">
-                  У этого клиента пока нет договоров. Сначала создай договор.
+                  У этого клиента пока нет договоров.
                   <a class="ms-2" href="{{ url_for('clients.contract_new_get', client_id=client.id) }}">Создать договор</a>
                 </div>
                 <input type="hidden" id="contractSelect" name="contract_id" value="">
@@ -183,7 +188,6 @@
               <select class="form-select" id="addendumSelect" name="addendum_file_id">
                 <option value="">— без доп. соглашения —</option>
               </select>
-              
             </div>
           </div>
 
@@ -229,59 +233,46 @@
         }
 
         function updateBalanceHint(){
-          const contractId = (document.getElementById('contractSelect').value || "").toString();
-          const info = document.getElementById('balanceInfo');
-          const btn = document.getElementById('submitTalonsBtn');
+          const contractId = (document.getElementById("contractSelect").value || "").toString();
+          const qty = numVal("qtyInput");
+          const liters = numVal("litersInput");
+          const info = BALANCES[contractId];
+          const box = document.getElementById("balanceInfo");
+          const submitBtn = document.getElementById("submitTalonsBtn");
 
-          if(!contractId || !BALANCES[contractId]){
-            info.style.display = 'none';
-            btn.disabled = false;
+          if(!contractId || !info){
+            box.style.display = "none";
+            if(submitBtn) submitBtn.disabled = false;
             return;
           }
 
-          const b = BALANCES[contractId];
-          if(!b.balance_control){
-            info.className = 'alert alert-light border mb-0';
-            info.innerHTML = 'Баланс по договору не контролируется. Талоны можно создать без проверки остатка.';
-            info.style.display = 'block';
-            btn.disabled = false;
-            return;
-          }
-
-          const qty = Math.max(1, parseInt(numVal('qtyInput') || 1));
-          const liters = numVal('litersInput');
           const need = qty * liters;
-          const left = parseFloat(b.liters_left || 0);
+          const left = parseFloat(info.liters_left || 0);
+          const controlled = !!info.balance_control;
 
-          if(need > left){
-            info.className = 'alert alert-danger mb-0';
-            info.innerHTML = `Остаток меньше нужного: доступно <b>${left.toFixed(2)} л</b>, нужно <b>${need.toFixed(2)} л</b>.`;
-            info.style.display = 'block';
-            btn.disabled = true;
+          box.style.display = "block";
+          box.innerHTML = `Остаток по договору: <b>${left.toFixed(2)} л</b><br>Будет списано: <b>${need.toFixed(2)} л</b>`;
+
+          if(controlled && need > left){
+            box.className = "alert alert-danger border mt-3 mb-0";
+            box.innerHTML += `<br><span>Недостаточно литров.</span>`;
+            if(submitBtn) submitBtn.disabled = true;
           } else {
-            info.className = 'alert alert-success mb-0';
-            info.innerHTML = `Остаток по договору: <b>${left.toFixed(2)} л</b>. Будет списано: <b>${need.toFixed(2)} л</b>. Останется: <b>${(left-need).toFixed(2)} л</b>.`;
-            info.style.display = 'block';
-            btn.disabled = false;
+            box.className = "alert alert-light border mt-3 mb-0";
+            if(submitBtn) submitBtn.disabled = false;
           }
         }
 
-        const contractEl = document.getElementById('contractSelect');
-        const litersEl = document.getElementById('litersInput');
-        const qtyEl = document.getElementById('qtyInput');
-
-        if(contractEl) {
-          contractEl.addEventListener('change', function(){
-            updateBalanceHint();
-            updateAddendums();
-          });
-        }
-
-        if(litersEl) litersEl.addEventListener('input', updateBalanceHint);
-        if(qtyEl) qtyEl.addEventListener('input', updateBalanceHint);
-
-        updateBalanceHint();
-        updateAddendums();
+        document.addEventListener("DOMContentLoaded", () => {
+          const contractSelect = document.getElementById("contractSelect");
+          const qtyInput = document.getElementById("qtyInput");
+          const litersInput = document.getElementById("litersInput");
+          if(contractSelect) contractSelect.addEventListener("change", () => { updateAddendums(); updateBalanceHint(); });
+          if(qtyInput) qtyInput.addEventListener("input", updateBalanceHint);
+          if(litersInput) litersInput.addEventListener("input", updateBalanceHint);
+          updateAddendums();
+          updateBalanceHint();
+        });
       </script>
     </div>
   </div>

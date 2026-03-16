@@ -35,7 +35,7 @@ def get_csrf_token() -> str:
 def validate_csrf() -> None:
     if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
         return
-    if request.endpoint in CSRF_EXEMPT_ENDPOINTS:
+    if request.path == '/login' or request.endpoint in CSRF_EXEMPT_ENDPOINTS:
         return
 
     sent_token = request.headers.get('X-CSRF-Token')

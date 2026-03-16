@@ -33,22 +33,21 @@ def format_kz(dt, fmt="%d.%m.%Y %H:%M"):
     return value.strftime(fmt) if value else ""
 
 
-def normalize_role(role):
-    mapping = {
-        "zamdirector": "deputy_director",
-        "deputy_director": "deputy_director",
-        "director": "director",
-        "executor": "executor",
-    }
-    return mapping.get(role, role)
+def _expand_roles(roles):
+    expanded = set(roles)
+    if "zamdirector" in expanded:
+        expanded.add("deputy_director")
+    if "deputy_director" in expanded:
+        expanded.add("zamdirector")
+    if "executor" in expanded:
+        expanded.add("operator")
+    if "operator" in expanded:
+        expanded.add("executor")
+    return expanded
 
 
 def has_role(*roles):
-    if not current_user.is_authenticated:
-        return False
-    current = normalize_role(getattr(current_user, "role", None))
-    allowed = {normalize_role(role) for role in roles}
-    return current in allowed
+    return current_user.is_authenticated and current_user.role in _expand_roles(roles)
 
 
 def require_roles(*roles):

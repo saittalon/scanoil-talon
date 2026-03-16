@@ -162,30 +162,6 @@ class Talon(db.Model):
 
 
 
-class ApprovalRequest(db.Model):
-    __tablename__ = "approval_requests"
-
-    id = db.Column(db.Integer, primary_key=True)
-    action_type = db.Column(db.String(50), nullable=False)  # balance_set / talons_add
-    status = db.Column(db.String(20), nullable=False, default="pending")  # pending/approved/rejected
-    payload_json = db.Column(db.Text, nullable=False)
-
-    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
-    client = db.relationship("Client", backref=db.backref("approval_requests", lazy=True))
-
-    contract_id = db.Column(db.Integer, db.ForeignKey("contract.id"), nullable=True)
-    contract = db.relationship("Contract", backref=db.backref("approval_requests", lazy=True))
-
-    created_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
-    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
-
-    approved_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
-    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
-
-    comment = db.Column(db.String(500), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    approved_at = db.Column(db.DateTime, nullable=True)
-
 
 class AGZS(db.Model):
     __tablename__ = "agzs"

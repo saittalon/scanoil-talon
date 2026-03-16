@@ -39,77 +39,84 @@
       </a>
     </div>
 
-    <div class="table-responsive mt-3">
-      <table class="table table-sm align-middle">
-        <thead>
-          <tr>
-            <th>№</th>
-            <th>Код</th>
-            <th>QR</th>
-            <th>Услуга</th>
-            <th>Номинал</th>
-            <th>Остаток</th>
-            <th>Период</th>
-            <th>Доп. соглашение</th>
-            <th>Статус</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in talons %}
-          <tr>
-            <td>{{ t.serial_number }}</td>
-            <td>{{ t.code }}</td>
-            <td>
-              <a href="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}">
-                <img alt="qr" src="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}" style="height:34px; width:34px;">
-              </a>
-            </td>
-            <td>{{ t.product_name }}</td>
-            <td>{{ '%.2f'|format(t.liters or 0) }} л</td>
-            <td>{% if t.effective_state == 'used' %}0.00 л{% else %}{{ '%.2f'|format(t.liters or 0) }} л{% endif %}</td>
-            <td>{{ t.valid_from }} – {{ t.valid_to }}</td>
-            <td>{{ t.addendum_file.original_name if t.addendum_file else "—" }}</td>
-            <td>
-              {% if t.effective_state == 'used' %}
-                <span class="badge text-bg-secondary">Использован</span>
-              {% elif t.effective_state == 'blocked' %}
-                <span class="badge text-bg-danger">Заблокирован</span>
-              {% elif t.effective_state == 'expired' %}
-                <span class="badge text-bg-warning">Срок действия истек</span>
-              {% else %}
-                <span class="badge text-bg-success">Активен</span>
-              {% endif %}
-            </td>
-            <td class="text-end">
-              <div class="d-flex justify-content-end gap-2 flex-wrap">
-                {% if t.effective_state == 'active' %}
-                  <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
-                    <button class="btn btn-outline-primary btn-sm">Использовать</button>
-                  </form>
-                {% elif t.effective_state == "expired" %}
-                  <span class="text-muted small">—</span>
-                {% else %}
-                  <span class="text-muted small">—</span>
-                {% endif %}
+    <div class="mt-3 d-flex flex-column gap-3">
+      {% for group in talon_groups %}
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
+            <div>
+              <div class="fw-semibold">📁 {{ group.title }}</div>
+              <div class="text-muted small">Талонов: {{ group.count }} • Объём: {{ '%.2f'|format(group.liters) }} л</div>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>Код</th>
+                  <th>QR</th>
+                  <th>Услуга</th>
+                  <th>Номинал</th>
+                  <th>Остаток</th>
+                  <th>Период</th>
+                  <th>Статус</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for t in group.talons %}
+                <tr>
+                  <td>{{ t.serial_number }}</td>
+                  <td>{{ t.code }}</td>
+                  <td>
+                    <a href="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}">
+                      <img alt="qr" src="{{ url_for('clients.talon_qr_png', talon_id=t.id) }}" style="height:34px; width:34px;">
+                    </a>
+                  </td>
+                  <td>{{ t.product_name }}</td>
+                  <td>{{ '%.2f'|format(t.liters or 0) }} л</td>
+                  <td>{% if t.effective_state == 'used' %}0.00 л{% else %}{{ '%.2f'|format(t.liters or 0) }} л{% endif %}</td>
+                  <td>{{ t.valid_from }} – {{ t.valid_to }}</td>
+                  <td>
+                    {% if t.effective_state == 'used' %}
+                      <span class="badge text-bg-secondary">Использован</span>
+                    {% elif t.effective_state == 'blocked' %}
+                      <span class="badge text-bg-danger">Заблокирован</span>
+                    {% elif t.effective_state == 'expired' %}
+                      <span class="badge text-bg-warning">Срок действия истек</span>
+                    {% else %}
+                      <span class="badge text-bg-success">Активен</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    <div class="d-flex justify-content-end gap-2 flex-wrap">
+                      {% if t.effective_state == 'active' %}
+                        <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
+                          <button class="btn btn-outline-primary btn-sm">Использовать</button>
+                        </form>
+                      {% else %}
+                        <span class="text-muted small">—</span>
+                      {% endif %}
 
-                {% if can_delete_talons %}
-                  <form method="post" action="{{ url_for('clients.talon_delete', talon_id=t.id) }}" style="display:inline" onsubmit="return confirm('Удалить талон?');">
-                    <button class="btn btn-outline-danger btn-sm">{{ 'На согласование' if current_role == 'executor' else 'Удалить' }}</button>
-                  </form>
-                {% endif %}
-              </div>
-            </td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="10" class="text-center text-muted py-4">Талоны не найдены</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+                      {% if can_delete_talons %}
+                        <form method="post" action="{{ url_for('clients.talon_delete', talon_id=t.id) }}" style="display:inline" onsubmit="return confirm('Удалить талон?');">
+                          <button class="btn btn-outline-danger btn-sm">{{ 'На согласование' if current_role == 'executor' else 'Удалить' }}</button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center text-muted py-4">Талоны не найдены</div>
+      {% endfor %}
+    </div>  </div>
 </div>
 
 <div class="modal fade" id="addTalonsModal" tabindex="-1" aria-hidden="true">

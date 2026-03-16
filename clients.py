@@ -411,7 +411,6 @@ def client_contracts(client_id):
         active_tab="contract",
         timedelta=timedelta,
         current_role=current_user.role,
-        pending_requests=pending_requests,
         can_approve_requests=can_approve_requests(),
     )
 
@@ -599,6 +598,25 @@ def client_talons(client_id):
 
     talons = q.order_by(Talon.id.desc()).all()
 
+    talon_groups_map = {}
+    for t in talons:
+        addendum_name = (t.addendum_file.original_name if getattr(t, 'addendum_file', None) and t.addendum_file.original_name else None)
+        group_name = addendum_name or 'Без доп. соглашения'
+        bucket = talon_groups_map.setdefault(group_name, {
+            'title': group_name,
+            'count': 0,
+            'liters': 0.0,
+            'talons': [],
+        })
+        bucket['count'] += 1
+        bucket['liters'] += float(t.liters or 0)
+        bucket['talons'].append(t)
+
+    talon_groups = sorted(
+        talon_groups_map.values(),
+        key=lambda item: (item['title'] == 'Без доп. соглашения', item['title'].lower())
+    )
+
     contracts = Contract.query.filter_by(client_id=client.id).order_by(Contract.id.desc()).all()
     balances = Balance.query.filter_by(client_id=client.id).all()
 
@@ -630,6 +648,7 @@ def client_talons(client_id):
         "client_talons.html",
         client=client,
         talons=talons,
+        talon_groups=talon_groups,
         contracts=contracts,
         balances_json=json.dumps(balances_map, ensure_ascii=False),
         addendums_json=json.dumps(addendums_map, ensure_ascii=False),
@@ -638,8 +657,7 @@ def client_talons(client_id):
         status=status,
         tabs=_client_tabs(client),
         active_tab="talons",
-        pending_requests=pending_requests,
-        can_approve_requests=can_approve_requests(),
+        current_role=current_user.role,
         can_delete_talons=can_delete_talons(),
     )
 
@@ -1153,6 +1171,7 @@ def client_reports(client_id):
         "client_reports.html",
         client=client,
         talons=talons,
+        talon_groups=talon_groups,
         balances=balances,
         date_from=date_from,
         date_to=date_to,

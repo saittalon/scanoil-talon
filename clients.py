@@ -16,7 +16,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from models import db, Client, Contract, Balance, Talon, ContractFile, TalonRedemption
-from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz, kz_today, kz_now
+from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz, kz_today, kz_now, redeem_talon_atomic
 from reports import dashboard_month_links
 from mail_utils import notify_event
 from security import log_audit
@@ -670,22 +670,29 @@ def client_talons_add(client_id):
 @clients_bp.post("/talons/<int:talon_id>/use")
 @login_required
 def talon_use(talon_id):
-    t = Talon.query.filter_by(id=talon_id).with_for_update().first_or_404()
-    status = talon_status(t)
+    used_time = kz_now()
+    redeem_status, t = redeem_talon_atomic(
+        talon_id=talon_id,
+        used_at=used_time,
+        user_id=current_user.id,
+    )
 
-    if status == "expired":
-        t.state = "expired"
-        db.session.commit()
+    if redeem_status == "not_found":
+        flash("Талон не найден", "danger")
+        return redirect(url_for("clients.list_clients"))
+
+    if redeem_status == "expired":
         flash("Срок действия талона истек", "danger")
         return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
 
-    if t.state == "used":
+    if redeem_status == "already_used":
         flash("Талон уже использован", "warning")
         return redirect(url_for("clients.client_talons", client_id=t.client_id, status="used"))
 
-    t.state = "used"
-    t.used_at = kz_now()
-    t.used_by_user_id = current_user.id
+    if redeem_status != "redeemed":
+        flash("Талон недоступен для использования", "warning")
+        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+
     log_audit("use_talon", f"{current_user.username} использовал талон {t.serial_number}", "talon", t.id)
     db.session.commit()
 
@@ -959,19 +966,46 @@ def client_reports(client_id):
         except ValueError:
             date_to = ""
 
-    talons = q.order_by(Talon.id.desc()).all()
-    balances = Balance.query.filter_by(client_id=client.id).all()
-
-    active_count = sum(1 for t in talons if talon_status(t) == "active")
-    used_count = sum(1 for t in talons if talon_status(t) == "used")
-    expired_count = sum(1 for t in talons if talon_status(t) == "expired")
-    blocked_count = sum(1 for t in talons if talon_status(t) == "blocked")
-
-    total_liters = sum(float(t.liters or 0) for t in talons)
-    used_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "used")
-    active_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "active")
-    expired_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "expired")
+    all_talons = q.order_by(Talon.id.desc()).all()
+    balances = Balance.query.filter_by(client_id=client.id).order_by(Balance.updated_at.desc()).all()
     balance_liters = sum(float(b.liters_left or 0) for b in balances)
+
+    active_count = used_count = expired_count = blocked_count = 0
+    total_liters = used_liters = active_liters = expired_liters = blocked_liters = 0.0
+    for t in all_talons:
+        liters = float(t.liters or 0)
+        total_liters += liters
+        state = talon_status(t)
+        if state == "used":
+            used_count += 1
+            used_liters += liters
+        elif state == "expired":
+            expired_count += 1
+            expired_liters += liters
+        elif state == "blocked":
+            blocked_count += 1
+            blocked_liters += liters
+        else:
+            active_count += 1
+            active_liters += liters
+
+    page = request.args.get("page", 1, type=int)
+    per_page = 100
+    total_count = len(all_talons)
+    start_idx = max((page - 1) * per_page, 0)
+    end_idx = start_idx + per_page
+    talons = all_talons[start_idx:end_idx]
+    total_pages = max(1, (total_count + per_page - 1) // per_page)
+    pagination = {
+        "page": page,
+        "per_page": per_page,
+        "total": total_count,
+        "pages": total_pages,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_num": page - 1,
+        "next_num": page + 1,
+    }
 
     return render_template(
         "client_reports.html",
@@ -988,7 +1022,10 @@ def client_reports(client_id):
         used_liters=used_liters,
         active_liters=active_liters,
         expired_liters=expired_liters,
+        blocked_liters=blocked_liters,
         balance_liters=balance_liters,
+        total_count=total_count,
+        pagination=pagination,
         tabs=_client_tabs(client),
         active_tab="reports",
     )

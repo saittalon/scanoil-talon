@@ -1,4 +1,13 @@
 import os
+from datetime import timedelta
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 db_url = os.getenv("DATABASE_URL", "")
 
@@ -15,6 +24,7 @@ if db_url.startswith("postgresql://"):
         "sslmode": "require"
     }
 
+
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
     SQLALCHEMY_DATABASE_URI = db_url
@@ -29,9 +39,20 @@ class Config:
     MAIL_TO = os.getenv("MAIL_TO", "")
 
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(10 * 1024 * 1024)))
+
+    SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "muraz_session")
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
-    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") == "1"
+    SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", True)
+    SESSION_REFRESH_EACH_REQUEST = True
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=int(os.getenv("SESSION_LIFETIME_HOURS", "12")))
+
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SECURE = SESSION_COOKIE_SECURE
     REMEMBER_COOKIE_SAMESITE = SESSION_COOKIE_SAMESITE
+
+    PREFERRED_URL_SCHEME = "https"
+    WTF_CSRF_TIME_LIMIT = None
+
+    SECURITY_HEADERS_ENABLED = _env_bool("SECURITY_HEADERS_ENABLED", True)
+    DEFAULT_SRC_CSP = "'self'"

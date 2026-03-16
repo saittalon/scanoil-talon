@@ -21,7 +21,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from app import create_app
 from models import db, Talon, AGZS, BotSession, TalonRedemption, WebAppToken, Shift
-from helpers import kz_now, to_kz
+from helpers import kz_now, to_kz, redeem_talon_atomic
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 WEBAPP_BASE_URL = os.getenv("WEBAPP_BASE_URL", "").strip().rstrip("/")
@@ -401,26 +401,28 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
             return ConversationHandler.END
 
-        talon = Talon.query.filter_by(code=code).first()
-        if not talon:
+        used_time = kz_now()
+        redeem_status, talon = redeem_talon_atomic(
+            code=code,
+            used_at=used_time,
+            agzs_id=sess.agzs_id,
+            telegram_user_id=str(sess.telegram_user_id),
+        )
+        if redeem_status == "not_found":
             await update.message.reply_text("❌ Талон не найден")
             return ConversationHandler.END
 
-        if talon.valid_to and talon.valid_to < kz_now().date():
-            talon.state = "expired"
-            db.session.commit()
+        if redeem_status == "expired":
             await update.message.reply_text("❌ Срок действия талона истек")
             return ConversationHandler.END
 
-        if talon.state == "used":
+        if redeem_status == "already_used":
             await update.message.reply_text("❌ Талон уже использован")
             return ConversationHandler.END
 
-        used_time = kz_now()
-
-        talon.state = "used"
-        talon.used_at = used_time
-        talon.used_agzs_id = sess.agzs_id
+        if redeem_status != "redeemed":
+            await update.message.reply_text("❌ Талон недоступен")
+            return ConversationHandler.END
 
         db.session.add(TalonRedemption(
             talon_id=talon.id,

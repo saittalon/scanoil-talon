@@ -3,6 +3,9 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from flask import flash, redirect, request
 from flask_login import current_user
+from sqlalchemy import update
+
+from models import db, Talon
 
 KZ_TZ = ZoneInfo("Asia/Almaty")
 UTC_TZ = timezone.utc
@@ -80,3 +83,80 @@ def talon_status_label(talon):
         "blocked": "Заблокирован",
     }
     return mapping.get(talon_status(talon), "Активен")
+
+
+def redeem_talon_atomic(*, code=None, talon_id=None, used_at=None, agzs_id=None, telegram_user_id=None, user_id=None):
+    """
+    Атомарно списывает талон только один раз.
+    Возвращает tuple(status, talon), где status:
+    - redeemed
+    - not_found
+    - expired
+    - already_used
+    - not_active
+    """
+    if not code and talon_id is None:
+        raise ValueError("code or talon_id is required")
+
+    now_dt = used_at or kz_now()
+    today = now_dt.date()
+
+    filters = []
+    if code:
+        filters.append(Talon.code == code)
+    if talon_id is not None:
+        filters.append(Talon.id == talon_id)
+
+    talon = Talon.query.filter(*filters).first()
+    if not talon:
+        return 'not_found', None
+
+    current = talon_status(talon)
+    if current == 'expired':
+        if talon.state != 'expired':
+            talon.state = 'expired'
+            db.session.commit()
+        return 'expired', talon
+
+    if talon.state == 'used' or talon.used_at is not None:
+        return 'already_used', talon
+
+    if talon.state != 'active' or (talon.valid_from and talon.valid_from > today):
+        return 'not_active', talon
+
+    values = {
+        Talon.state: 'used',
+        Talon.used_at: now_dt,
+    }
+    if agzs_id is not None:
+        values[Talon.used_agzs_id] = agzs_id
+    if telegram_user_id is not None:
+        values[Talon.used_telegram_user_id] = str(telegram_user_id)
+    if user_id is not None:
+        values[Talon.used_by_user_id] = user_id
+
+    stmt = (
+        update(Talon)
+        .where(*filters)
+        .where(Talon.state == 'active')
+        .where(Talon.used_at.is_(None))
+        .where(Talon.valid_to >= today)
+    )
+    if talon.valid_from is not None:
+        stmt = stmt.where(Talon.valid_from <= today)
+
+    result = db.session.execute(stmt.values(values))
+    if result.rowcount != 1:
+        db.session.rollback()
+        talon = Talon.query.filter(*filters).first()
+        if not talon:
+            return 'not_found', None
+        current = talon_status(talon)
+        if current == 'expired':
+            return 'expired', talon
+        if talon.state == 'used' or talon.used_at is not None:
+            return 'already_used', talon
+        return 'not_active', talon
+
+    talon = Talon.query.filter(*filters).first()
+    return 'redeemed', talon

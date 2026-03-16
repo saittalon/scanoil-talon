@@ -1,10 +1,12 @@
 import os
 from datetime import datetime, timezone
 
+from sqlalchemy import text
+
 from flask import (
-    Flask, redirect, url_for, request, jsonify, render_template, abort, flash
+    Flask, redirect, url_for, request, jsonify, render_template, abort, flash, session
 )
-from flask_login import LoginManager, login_required
+from flask_login import LoginManager, login_required, current_user
 from supabase import create_client
 
 from config import Config
@@ -16,7 +18,7 @@ from models import (
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
-from helpers import require_roles, talon_status_label, format_kz, kz_now
+from helpers import require_roles, talon_status_label, format_kz, kz_now, redeem_talon_atomic
 from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 from security import (
@@ -26,13 +28,38 @@ from security import (
     get_client_ip,
     log_audit,
     verify_telegram_init_data,
+    apply_security_headers,
 )
 
 
+
+def _ensure_performance_indexes():
+    statements = [
+        "CREATE INDEX IF NOT EXISTS ix_talon_client_state_valid_to ON talon (client_id, state, valid_to)",
+        "CREATE INDEX IF NOT EXISTS ix_talon_contract_state_created ON talon (contract_id, state, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_talon_code_unique_lookup ON talon (code)",
+        "CREATE INDEX IF NOT EXISTS ix_talon_created_at ON talon (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_talon_valid_from_to ON talon (valid_from, valid_to)",
+        "CREATE INDEX IF NOT EXISTS ix_balance_client_contract_product ON balance (client_id, contract_id, product_name)",
+        "CREATE INDEX IF NOT EXISTS ix_contract_client_number ON contract (client_id, number)",
+        "CREATE INDEX IF NOT EXISTS ix_rate_limit_category_key_created ON rate_limit_events (category, key, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_redemption_talon_used_at ON talon_redemptions (talon_id, used_at)",
+    ]
+    for stmt in statements:
+        try:
+            db.session.execute(text(stmt))
+        except Exception:
+            db.session.rollback()
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 ALLOWED_SITE_USERS = {
-    "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "123456Muraz"), "director"),
-    "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "123456Muraz"), "zamdirector"),
-    "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
+    "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "").strip(), "director"),
+    "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "").strip(), "zamdirector"),
+    "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "").strip(), "executor"),
 }
 
 
@@ -43,6 +70,8 @@ def _ensure_only_allowed_users():
     for username, (password, role) in ALLOWED_SITE_USERS.items():
         user = User.query.filter_by(username=username).first()
         if not user:
+            if not password:
+                continue
             user = User(username=username, role=role)
             user.set_password(password)
             db.session.add(user)
@@ -93,6 +122,7 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        _ensure_performance_indexes()
         _ensure_only_allowed_users()
 
     login_manager = LoginManager()
@@ -105,7 +135,19 @@ def create_app():
 
     @app.before_request
     def protect_requests():
+        session.permanent = True
         validate_csrf()
+        if request.path == '/login' and request.method == 'POST':
+            key = f"{get_client_ip()}:{(request.headers.get('User-Agent') or '')[:60]}"
+            limited = check_rate_limit_or_429(
+                category='login_ip',
+                key=key,
+                limit=20,
+                window_seconds=300,
+                message='Слишком много попыток входа с этого устройства. Подождите 5 минут.',
+            )
+            if limited:
+                return limited
         if request.path == '/tg/api/scan':
             key = f"{get_client_ip()}:{(request.headers.get('User-Agent') or '')[:60]}"
             limited = check_rate_limit_or_429(
@@ -117,6 +159,12 @@ def create_app():
             )
             if limited:
                 return limited
+
+    @app.after_request
+    def harden_response(response):
+        if app.config.get('SECURITY_HEADERS_ENABLED', True):
+            response = apply_security_headers(response)
+        return response
 
     @app.context_processor
     def inject_role_label():
@@ -159,7 +207,8 @@ def create_app():
 
     @app.errorhandler(413)
     def file_too_large(_err):
-        flash('Файл слишком большой. Разрешено не более 10 МБ.', 'danger')
+        max_mb = max(1, int(app.config.get('MAX_CONTENT_LENGTH', 0) / (1024 * 1024)))
+        flash(f'Файл слишком большой. Разрешено не более {max_mb} МБ.', 'danger')
         return redirect(request.referrer or url_for('clients.list_clients'))
 
     @app.errorhandler(429)
@@ -182,6 +231,9 @@ def create_app():
     def download_contract_file(file_id: int):
         f = ContractFile.query.get_or_404(file_id)
 
+        if f.approval_status != 'approved' and getattr(current_user, 'role', None) not in {'director', 'zamdirector', 'deputy_director'}:
+            abort(403, description='Файл еще не подтвержден.')
+
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -196,7 +248,7 @@ def create_app():
         if not key:
             abort(404)
 
-        signed = sb.storage.from_(bucket).create_signed_url(key, 60)
+        signed = sb.storage.from_(bucket).create_signed_url(key, 60, {"download": f.original_name or "document.pdf"})
         signed_url = signed.get("signedURL") or signed.get("signedUrl")
 
         if not signed_url:
@@ -260,43 +312,41 @@ def create_app():
         if sess is None:
             return jsonify({"ok": False, "error": "not_logged_in"}), 401
 
-        talon = Talon.query.filter_by(code=code).with_for_update().first()
-        if talon is None:
+        used_time = kz_now()
+        redeem_status, talon = redeem_talon_atomic(
+            code=code,
+            used_at=used_time,
+            agzs_id=sess.agzs_id,
+            telegram_user_id=str(sess.telegram_user_id),
+        )
+        if redeem_status == "not_found":
             return jsonify({"ok": False, "error": "talon_not_found"}), 404
 
-        if talon.valid_to and talon.valid_to < kz_now().date():
-            talon.state = "expired"
-            db.session.commit()
+        if redeem_status == "expired":
             return jsonify({"ok": False, "error": "expired"}), 409
 
-        if getattr(talon, "state", None) == "used":
+        if redeem_status == "already_used":
             last = (
                 TalonRedemption.query
                 .filter_by(talon_id=talon.id)
                 .order_by(TalonRedemption.used_at.desc())
                 .first()
             )
-
             return jsonify({
                 "ok": False,
                 "error": "already_used",
-                "used_at": last.used_at.isoformat() if last and last.used_at else None,
-                "agzs": last.agzs.name if last and last.agzs else None,
+                "used_at": last.used_at.isoformat() if last and last.used_at else talon.used_at.isoformat() if talon.used_at else None,
+                "agzs": last.agzs.name if last and last.agzs else talon.used_agzs.name if talon.used_agzs else None,
             }), 409
 
-        if getattr(talon, 'state', None) == 'blocked' or (talon.valid_from and talon.valid_from > kz_now().date()):
+        if redeem_status != "redeemed":
             return jsonify({"ok": False, "error": "not_active"}), 409
-
-        talon.state = "used"
-        talon.used_at = kz_now()
-        talon.used_agzs_id = sess.agzs_id
-        talon.used_telegram_user_id = str(sess.telegram_user_id)
 
         red = TalonRedemption(
             talon_id=talon.id,
             agzs_id=sess.agzs_id,
             telegram_user_id=str(sess.telegram_user_id),
-            used_at=kz_now(),
+            used_at=used_time,
             source="telegram_webapp",
         )
 

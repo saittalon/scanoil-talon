@@ -437,20 +437,45 @@ def reports_all_page():
     start, end, date_from, date_to, month = _resolve_period()
     q = _filter_talons(Talon.query, start, end)
     talons = q.order_by(Talon.created_at.desc()).all()
-    rows, summary_rows, balance_rows = _build_all_reports_data(talons)
+    _rows, summary_rows, balance_rows = _build_all_reports_data(talons)
     total_balance_liters = sum(float(item['Остаток'] or 0) for item in balance_rows)
 
     total_count = len(talons)
-    active_count = sum(1 for t in talons if t.effective_state == 'active')
-    used_count = sum(1 for t in talons if t.effective_state == 'used')
-    expired_count = sum(1 for t in talons if t.effective_state == 'expired')
-    blocked_count = sum(1 for t in talons if t.effective_state == 'blocked')
+    active_count = used_count = expired_count = blocked_count = 0
+    total_liters = active_liters = used_liters = expired_liters = blocked_liters = 0.0
+    for t in talons:
+        liters = float(t.liters or 0)
+        total_liters += liters
+        state = t.effective_state
+        if state == 'used':
+            used_count += 1
+            used_liters += liters
+        elif state == 'expired':
+            expired_count += 1
+            expired_liters += liters
+        elif state == 'blocked':
+            blocked_count += 1
+            blocked_liters += liters
+        else:
+            active_count += 1
+            active_liters += liters
 
-    total_liters = sum(float(t.liters or 0) for t in talons)
-    active_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'active')
-    used_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'used')
-    expired_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'expired')
-    blocked_liters = sum(float(t.liters or 0) for t in talons if t.effective_state == 'blocked')
+    page = request.args.get('page', 1, type=int)
+    per_page = 200
+    start_idx = max((page - 1) * per_page, 0)
+    end_idx = start_idx + per_page
+    rows = _rows[start_idx:end_idx]
+    total_pages = max(1, (len(_rows) + per_page - 1) // per_page)
+    pagination = {
+        'page': page,
+        'per_page': per_page,
+        'total': len(_rows),
+        'pages': total_pages,
+        'has_prev': page > 1,
+        'has_next': page < total_pages,
+        'prev_num': page - 1,
+        'next_num': page + 1,
+    }
 
     return render_template(
         'reports_all.html',
@@ -471,6 +496,7 @@ def reports_all_page():
         date_from=date_from,
         date_to=date_to,
         selected_month=month,
+        pagination=pagination,
     )
 
 

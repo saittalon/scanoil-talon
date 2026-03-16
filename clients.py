@@ -157,14 +157,18 @@ def list_clients():
 @clients_bp.get("/clients/new", endpoint="new_client")
 @login_required
 def client_new_get():
-    
+    if not is_admin():
+        flash("Только админ может добавлять клиентов", "warning")
+        return redirect(url_for("clients.list_clients"))
     return render_template("client_new.html")
 
 
 @clients_bp.post("/clients/new", endpoint="new_client_post")
 @login_required
 def client_new_post():
-    
+    if not is_admin():
+        flash("Только админ может добавлять клиентов", "warning")
+        return redirect(url_for("clients.list_clients"))
 
     name = request.form.get("name", "").strip()
     if not name:
@@ -444,14 +448,22 @@ def client_talons(client_id):
     grouped_talons = []
     grouped_index = {}
     for talon in talons:
-        group_id = talon.addendum_file.id if talon.addendum_file else 0
-        if group_id not in grouped_index:
-            title = talon.addendum_file.original_name if talon.addendum_file and talon.addendum_file.original_name else "Без доп. соглашения"
-            group = {"id": group_id, "title": title, "talons": [], "total_liters": 0.0}
-            grouped_index[group_id] = group
-            grouped_talons.append(group)
-        grouped_index[group_id]["talons"].append(talon)
-        grouped_index[group_id]["total_liters"] += float(talon.liters or 0)
+        if talon.addendum_file:
+            group_key = f"addendum-{talon.addendum_file.id}"
+            group_title = talon.addendum_file.original_name or talon.addendum_file.title or f"Доп. соглашение #{talon.addendum_file.id}"
+        elif talon.contract_id:
+            group_key = f"contract-{talon.contract_id}"
+            group_title = f"Без доп. соглашения — {talon.contract.number if talon.contract else 'договор'}"
+        else:
+            group_key = "other"
+            group_title = "Без договора"
+
+        if group_key not in grouped_index:
+            grouped_index[group_key] = {"key": group_key, "title": group_title, "talons": [], "total_liters": 0.0}
+            grouped_talons.append(grouped_index[group_key])
+
+        grouped_index[group_key]["talons"].append(talon)
+        grouped_index[group_key]["total_liters"] += float(talon.liters or 0)
 
     contracts = Contract.query.filter_by(client_id=client.id).order_by(Contract.id.desc()).all()
     balances = Balance.query.filter_by(client_id=client.id).all()
@@ -708,15 +720,23 @@ def talon_extend(talon_id):
 def talon_delete(talon_id):
     t = Talon.query.get_or_404(talon_id)
 
-    if not has_role("director", "zamdirector", "deputy_director", "executor", "operator"):
+    if not has_role("director", "zamdirector", "deputy_director"):
         flash("Недостаточно прав для удаления талона.", "danger")
         return redirect(url_for("clients.client_talons", client_id=t.client_id))
 
-    if t.state == "used":
+    status = talon_status(t)
+    if status == "used":
         flash("Использованный талон удалять нельзя.", "danger")
         return redirect(url_for("clients.client_talons", client_id=t.client_id, status="used"))
 
-    status = talon_status(t)
+    if t.contract_id:
+        bal = Balance.query.filter_by(client_id=t.client_id, contract_id=t.contract_id, product_name=t.product_name).first()
+        if bal is None:
+            bal = Balance.query.filter_by(client_id=t.client_id, contract_id=t.contract_id).first()
+        if bal is not None:
+            bal.liters_left = float(bal.liters_left or 0) + float(t.liters or 0)
+            bal.updated_at = datetime.utcnow()
+
     client_id = t.client_id
     db.session.delete(t)
     db.session.commit()
@@ -939,7 +959,6 @@ def client_reports(client_id):
         "client_reports.html",
         client=client,
         talons=talons,
-        grouped_talons=grouped_talons,
         balances=balances,
         date_from=date_from,
         date_to=date_to,

@@ -18,7 +18,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABAS
 
 
 def _can_auto_approve():
-    return has_role('director', 'zamdirector', 'deputy_director')
+    return has_role('director', 'deputy_director')
 
 
 @contract_files_bp.post('/contracts/<int:contract_id>/files/upload')
@@ -80,7 +80,7 @@ def upload_contract_file(contract_id: int):
 @contract_files_bp.post('/contracts/files/<int:file_id>/approve')
 @login_required
 def approve_contract_file(file_id: int):
-    if not has_role('director', 'zamdirector', 'deputy_director'):
+    if not has_role('director', 'deputy_director'):
         flash('Подтверждать может только директор или замдиректора.', 'danger')
         return redirect(request.referrer or '/')
     row = ContractFile.query.get_or_404(file_id)

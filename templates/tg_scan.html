@@ -154,6 +154,7 @@
 <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
 <script>
 const TOKEN = {{ token|tojson }};
+const INIT_DATA = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) ? Telegram.WebApp.initData : "";
 const statusEl = document.getElementById('status');
 const statusIconEl = document.getElementById('statusIcon');
 const statusTextEl = document.getElementById('statusText');
@@ -401,7 +402,7 @@ async function submitCode(rawCode){
     const res = await fetch('/tg/api/scan', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({token: TOKEN, code})
+      body: JSON.stringify({token: TOKEN, code, initData: INIT_DATA})
     });
 
     const data = await res.json().catch(()=>({ok:false,error:'bad_json'}));
@@ -437,6 +438,10 @@ async function submitCode(rawCode){
       setStatus('Сессия истекла.', 'error');
       playErrorFeedback();
       return;
+    } else if(data.error === 'invalid_telegram_context'){
+      addToList('err', '❌ Недействительная Telegram-сессия. Вернитесь в бот и откройте сканер заново.');
+      setStatus('Недействительная Telegram-сессия.', 'error');
+      playErrorFeedback();
     } else if(data.error === 'missing_token_or_code'){
       addToList('err', '❌ Пустой код.');
       setStatus('Пустой код.', 'error');

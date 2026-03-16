@@ -22,6 +22,32 @@
       </form>
     </div>
 
+    {% if pending_requests %}
+    <div class="alert alert-light border mt-3 mb-0">
+      <div class="fw-semibold mb-1">Заявки на подтверждение</div>
+      <div class="small text-muted">Исполнитель отправляет заявку, директор или замдиректора подтверждает её перед созданием талонов или изменением остатка.</div>
+      <div class="mt-2 d-flex flex-column gap-2">
+        {% for req in pending_requests[:5] %}
+        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+          <div>
+            <strong>#{{ req.id }}</strong> — {{ 'Изменение остатка' if req.action_type == 'balance_set' else 'Создание талонов' }}
+            <span class="text-muted">• {{ req.created_by.username if req.created_by else '—' }}</span>
+            {% if req.status == 'pending' %}<span class="badge text-bg-warning ms-2">Ожидает подтверждения</span>
+            {% elif req.status == 'approved' %}<span class="badge text-bg-success ms-2">Подтверждена</span>
+            {% else %}<span class="badge text-bg-danger ms-2">Отклонена</span>{% endif %}
+          </div>
+          {% if can_approve_requests and req.status == 'pending' %}
+          <div class="d-flex gap-2">
+            <form method="post" action="{{ url_for('clients.approve_request', request_id=req.id) }}"><button class="btn btn-outline-success btn-sm">Подтвердить</button></form>
+            <form method="post" action="{{ url_for('clients.reject_request', request_id=req.id) }}"><button class="btn btn-outline-danger btn-sm">Отклонить</button></form>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <div class="mt-3 d-flex gap-2 flex-wrap">
       <a href="{{ url_for('clients.client_talons', client_id=client.id, status='active', date_from=date_from, date_to=date_to) }}"
          class="btn btn-sm {% if status == 'active' %}btn-primary{% else %}btn-outline-primary{% endif %}">

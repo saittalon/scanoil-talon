@@ -44,11 +44,11 @@
         <div>
           <div class="hero-kicker">Карточка договора</div>
           <div class="hero-title" style="font-size:1.75rem;">{{ selected.number }}</div>
-          <div class="hero-subtitle">Договор действует с {{ selected.date_from }}{% if selected.date_to %} по {{ selected.date_to }}{% endif %}. Тут теперь в одном месте цена, остатки и документы.</div>
+          <div class="hero-subtitle">Договор действует с {{ selected.date_from }}{% if selected.date_to %} по {{ selected.date_to }}{% endif %}. В карточке договора доступны цена, остаток и комплект документов.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients.contract_edit_get', client_id=client.id, contract_id=selected.id) }}">Редактировать</a>
-          {% if current_role in ["director","deputy_director"] %}<button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Добавить остатки для талонов</button>{% endif %}
+          {% if current_role in ["director","deputy_director","zamdirector"] %}<button class="btn btn-brand btn-sm" data-bs-toggle="modal" data-bs-target="#balanceModal">Добавить остатки для талонов</button>{% endif %}
         </div>
       </div>
 
@@ -93,7 +93,7 @@
               </div>
               <div class="d-flex gap-2">
                 <a target="_blank" class="btn btn-outline-secondary btn-sm" href="{{ url_for('download_contract_file', file_id=f.id) }}">Открыть</a>
-                {% if f.approval_status != "approved" and current_role in ["director","deputy_director"] %}<form method="post" action="{{ url_for('contract_files.approve_contract_file', file_id=f.id) }}"><button class="btn btn-outline-success btn-sm" type="submit">Подтвердить</button></form>{% endif %}<form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
+                {% if f.approval_status != "approved" and current_role in ["director","deputy_director","zamdirector"] %}<form method="post" action="{{ url_for('contract_files.approve_contract_file', file_id=f.id) }}"><button class="btn btn-outline-success btn-sm" type="submit">Подтвердить</button></form>{% endif %}<form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
                   <button class="btn btn-outline-danger btn-sm" type="submit">Удалить</button>
                 </form>
               </div>
@@ -108,7 +108,7 @@
           <div class="d-flex align-items-center justify-content-between gap-2">
             <div>
               <div class="fw-semibold">📁 Дополнительные соглашения</div>
-              <div class="client-meta mt-1">Все допики лежат отдельно и не мешаются с основным договором</div>
+              <div class="client-meta mt-1">Дополнительные соглашения хранятся отдельно от основного договора</div>
             </div>
             <span class="pill-stat">{{ add_files|length }}</span>
           </div>
@@ -126,7 +126,7 @@
               </div>
               <div class="d-flex gap-2">
                 <a target="_blank" class="btn btn-outline-secondary btn-sm" href="{{ url_for('download_contract_file', file_id=f.id) }}">Открыть</a>
-                {% if f.approval_status != "approved" and current_role in ["director","deputy_director"] %}<form method="post" action="{{ url_for('contract_files.approve_contract_file', file_id=f.id) }}"><button class="btn btn-outline-success btn-sm" type="submit">Подтвердить</button></form>{% endif %}<form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
+                {% if f.approval_status != "approved" and current_role in ["director","deputy_director","zamdirector"] %}<form method="post" action="{{ url_for('contract_files.approve_contract_file', file_id=f.id) }}"><button class="btn btn-outline-success btn-sm" type="submit">Подтвердить</button></form>{% endif %}<form method="post" action="{{ url_for('contract_files.delete_contract_file', file_id=f.id) }}">
                   <button class="btn btn-outline-danger btn-sm" type="submit">Удалить</button>
                 </form>
               </div>
@@ -214,4 +214,53 @@
     {% endif %}
   </div>
 </div>
+
+
+{% if selected and pending_requests %}
+<div class="info-card mt-4">
+  <div class="d-flex justify-content-between align-items-center gap-2 mb-3 flex-wrap">
+    <div>
+      <h6 class="mb-1">Заявки на подтверждение</h6>
+      <div class="client-meta">Создание талонов и изменение остатка исполнителем проходят через подтверждение.</div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>ID</th><th>Операция</th><th>Статус</th><th>Автор</th><th>Дата</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in pending_requests %}
+          {% if not req.contract_id or req.contract_id == selected.id %}
+          <tr>
+            <td>#{{ req.id }}</td>
+            <td>{{ 'Изменение остатка' if req.action_type == 'balance_set' else 'Создание талонов' }}</td>
+            <td>
+              {% if req.status == 'pending' %}<span class="badge text-bg-warning">Ожидает подтверждения</span>
+              {% elif req.status == 'approved' %}<span class="badge text-bg-success">Подтверждена</span>
+              {% else %}<span class="badge text-bg-danger">Отклонена</span>{% endif %}
+            </td>
+            <td>{{ req.created_by.username if req.created_by else '—' }}</td>
+            <td>{{ req.created_at.strftime('%Y-%m-%d %H:%M') if req.created_at else '' }}</td>
+            <td class="text-end">
+              {% if can_approve_requests and req.status == 'pending' %}
+              <div class="d-flex gap-2 justify-content-end">
+                <form method="post" action="{{ url_for('clients.approve_request', request_id=req.id) }}"><button class="btn btn-outline-success btn-sm">Подтвердить</button></form>
+                <form method="post" action="{{ url_for('clients.reject_request', request_id=req.id) }}"><button class="btn btn-outline-danger btn-sm">Отклонить</button></form>
+              </div>
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}

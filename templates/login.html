@@ -132,8 +132,9 @@
 </head>
 <body>
   <div class="login-box">
+    <div style="text-align:center; margin-bottom:18px;"><img src="{{ url_for('static', filename='img/company_logo.png') }}" alt="MurAz" style="max-width:220px; max-height:72px; object-fit:contain;"></div>
     <div class="title">MurAz CRM</div>
-    <div class="subtitle">Вход в систему</div>
+    <div class="subtitle">Корпоративный вход в систему</div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

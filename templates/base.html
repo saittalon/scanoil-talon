@@ -65,6 +65,9 @@
         <a class="sidebar-link {{ 'active' if request.path.startswith('/clients') else '' }}" href="/clients">Dashboard / Клиенты</a>
         <a class="sidebar-link {{ 'active' if request.path.startswith('/reports') else '' }}" href="/reports">Аналитика и отчёты</a>
         <a class="sidebar-link" href="/clients/new">Новый клиент</a>
+        {% if current_user.role in ["director", "zamdirector", "deputy_director"] %}
+        <a class="sidebar-link {{ "active" if request.path.startswith('/admin/audit-logs') else "" }}" href="/admin/audit-logs">Логи и backup</a>
+        {% endif %}
       </nav>
 
       <div class="sidebar-user mt-auto">
@@ -75,7 +78,7 @@
             <div class="brand-subtitle">{{ role_label(current_user.role) }}</div>
           </div>
         </div>
-        <form method="post" action="{{ url_for('auth.logout') }}" class="mt-3"><button type="submit" class="btn btn-outline-secondary w-100">Выйти</button></form>
+        <form method="post" action="/logout" class="mt-3"><button class="btn btn-outline-secondary w-100" type="submit">Выйти</button></form>
       </div>
     </aside>
 

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="mb-1">Журнал действий</h2>
+    <div class="text-muted">Последние действия пользователей и системные события</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_backup_download') }}">Скачать backup</a>
+  </div>
+</div>
+<form class="card card-body mb-3" method="get">
+  <div class="row g-2">
+    <div class="col-md-3"><input class="form-control" name="username" value="{{ request.args.get('username','') }}" placeholder="Пользователь"></div>
+    <div class="col-md-3"><input class="form-control" name="action" value="{{ request.args.get('action','') }}" placeholder="Действие"></div>
+    <div class="col-md-3"><input class="form-control" name="q" value="{{ request.args.get('q','') }}" placeholder="Текст"></div>
+    <div class="col-md-3 d-grid"><button class="btn btn-brand">Фильтр</button></div>
+  </div>
+</form>
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Дата</th><th>Пользователь</th><th>Роль</th><th>Действие</th><th>Объект</th><th>IP</th><th>Сообщение</th></tr></thead>
+      <tbody>
+      {% for row in logs %}
+        <tr>
+          <td>{{ format_kz(row.created_at) if row.created_at else '' }}</td>
+          <td>{{ row.username or 'system' }}</td>
+          <td>{{ role_label(row.user_role) if row.user_role else '—' }}</td>
+          <td><span class="badge text-bg-light">{{ row.action }}</span></td>
+          <td>{{ row.object_type or '—' }}{% if row.object_id %} #{{ row.object_id }}{% endif %}</td>
+          <td>{{ row.ip_address or '—' }}</td>
+          <td style="min-width:260px">{{ row.message }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">Записей нет</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

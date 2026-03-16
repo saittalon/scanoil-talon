@@ -13,6 +13,7 @@ from models import db, AuditLog, RateLimitEvent
 
 CSRF_EXEMPT_ENDPOINTS = {
     'tg_api_scan',
+    'auth.login_post',
 }
 
 

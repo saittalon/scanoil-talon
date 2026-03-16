@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
 
-from flask import abort, jsonify, request, session
+from flask import abort, current_app, g, jsonify, request, session
 from flask_login import current_user
 
 from models import db, AuditLog, RateLimitEvent
@@ -13,6 +13,7 @@ from models import db, AuditLog, RateLimitEvent
 
 CSRF_EXEMPT_ENDPOINTS = {
     'tg_api_scan',
+    'auth.login_post',
 }
 
 
@@ -34,7 +35,7 @@ def get_csrf_token() -> str:
 def validate_csrf() -> None:
     if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
         return
-    if request.endpoint in CSRF_EXEMPT_ENDPOINTS:
+    if request.path == '/login' or request.endpoint in CSRF_EXEMPT_ENDPOINTS:
         return
 
     sent_token = request.headers.get('X-CSRF-Token')
@@ -92,35 +93,9 @@ def log_audit(action: str, message: str, object_type: str | None = None, object_
         )
         db.session.add(row)
         db.session.flush()
+        current_app.logger.info("AUDIT %s user=%s obj=%s#%s msg=%s", action, row.username or "system", object_type or "-", object_id or "-", message)
     except Exception:
         db.session.rollback()
-
-
-def apply_security_headers(response):
-    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
-    response.headers.setdefault('X-Frame-Options', 'DENY')
-    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
-    response.headers.setdefault('Permissions-Policy', 'camera=(self), geolocation=(), microphone=(self)')
-    response.headers.setdefault('Cross-Origin-Opener-Policy', 'same-origin')
-    response.headers.setdefault('Cross-Origin-Resource-Policy', 'same-origin')
-    response.headers.setdefault('Cache-Control', 'no-store')
-
-    csp_parts = {
-        'default-src': ["'self'"],
-        'img-src': ["'self'", 'data:', 'blob:', 'https:'],
-        'style-src': ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net', 'https://fonts.googleapis.com'],
-        'script-src': ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
-        'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://cdn.jsdelivr.net'],
-        'connect-src': ["'self'", 'https://api.telegram.org', 'https://*.telegram.org', 'https://*.supabase.co', 'wss://*.supabase.co'],
-        'frame-ancestors': ["'none'"],
-        'base-uri': ["'self'"],
-        'form-action': ["'self'"],
-    }
-    response.headers.setdefault(
-        'Content-Security-Policy',
-        '; '.join(f"{k} {' '.join(v)}" for k, v in csp_parts.items())
-    )
-    return response
 
 
 def verify_telegram_init_data(init_data: str, bot_token: str, max_age_seconds: int = 600):

@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from flask import (
-    Flask, redirect, url_for, request, jsonify, render_template, abort, flash, session
+    Flask, redirect, url_for, request, jsonify, render_template, abort, flash, send_file, g
 )
-from flask_login import LoginManager, login_required, current_user
+from flask_login import LoginManager, login_required
 from supabase import create_client
 
 from config import Config
+from backup_utils import build_backup_zip
 from models import (
     db,
     User, Talon, BotSession, TalonRedemption, WebAppToken,
@@ -19,6 +20,7 @@ from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
 from helpers import require_roles, talon_status_label, format_kz, kz_now, redeem_talon_atomic
+from models import AuditLog
 from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 from security import (
@@ -28,7 +30,6 @@ from security import (
     get_client_ip,
     log_audit,
     verify_telegram_init_data,
-    apply_security_headers,
 )
 
 
@@ -56,10 +57,30 @@ def _ensure_performance_indexes():
         db.session.rollback()
 
 
+
+import logging
+from logging.handlers import RotatingFileHandler
+
+
+def _configure_logging(app):
+    os.makedirs(os.path.dirname(app.config.get("APP_LOG_FILE", "logs/app.log")), exist_ok=True)
+    if app.logger.handlers:
+        for h in list(app.logger.handlers):
+            app.logger.removeHandler(h)
+    file_handler = RotatingFileHandler(app.config.get("APP_LOG_FILE", "logs/app.log"), maxBytes=2 * 1024 * 1024, backupCount=5, encoding='utf-8')
+    fmt = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
+    file_handler.setFormatter(fmt)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(fmt)
+    app.logger.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.addHandler(stream_handler)
+    app.logger.propagate = False
+
 ALLOWED_SITE_USERS = {
-    "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "").strip(), "director"),
-    "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "").strip(), "zamdirector"),
-    "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "").strip(), "executor"),
+    "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "123456Muraz"), "director"),
+    "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "123456Muraz"), "zamdirector"),
+    "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
 }
 
 
@@ -70,8 +91,6 @@ def _ensure_only_allowed_users():
     for username, (password, role) in ALLOWED_SITE_USERS.items():
         user = User.query.filter_by(username=username).first()
         if not user:
-            if not password:
-                continue
             user = User(username=username, role=role)
             user.set_password(password)
             db.session.add(user)
@@ -119,6 +138,7 @@ def create_app():
     app.config.from_object(Config)
 
     db.init_app(app)
+    _configure_logging(app)
 
     with app.app_context():
         db.create_all()
@@ -135,19 +155,8 @@ def create_app():
 
     @app.before_request
     def protect_requests():
-        session.permanent = True
+        g.request_started_at = datetime.utcnow()
         validate_csrf()
-        if request.path == '/login' and request.method == 'POST':
-            key = f"{get_client_ip()}:{(request.headers.get('User-Agent') or '')[:60]}"
-            limited = check_rate_limit_or_429(
-                category='login_ip',
-                key=key,
-                limit=20,
-                window_seconds=300,
-                message='Слишком много попыток входа с этого устройства. Подождите 5 минут.',
-            )
-            if limited:
-                return limited
         if request.path == '/tg/api/scan':
             key = f"{get_client_ip()}:{(request.headers.get('User-Agent') or '')[:60]}"
             limited = check_rate_limit_or_429(
@@ -161,9 +170,16 @@ def create_app():
                 return limited
 
     @app.after_request
-    def harden_response(response):
-        if app.config.get('SECURITY_HEADERS_ENABLED', True):
-            response = apply_security_headers(response)
+    def write_access_log(response):
+        started = getattr(g, 'request_started_at', None)
+        duration_ms = 0
+        if started:
+            duration_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+        log_line = '%s %s -> %s in %sms ip=%s'
+        if response.status_code >= 400:
+            app.logger.warning(log_line, request.method, request.path, response.status_code, duration_ms, get_client_ip())
+        else:
+            app.logger.info(log_line, request.method, request.path, response.status_code, duration_ms, get_client_ip())
         return response
 
     @app.context_processor
@@ -219,7 +235,8 @@ def create_app():
         return redirect(request.referrer or url_for('clients.list_clients'))
 
     @app.errorhandler(500)
-    def internal_error(_err):
+    def internal_error(err):
+        app.logger.exception('Unhandled server error on %s %s', request.method, request.path)
         db.session.rollback()
         if request.path.startswith('/tg/api/'):
             return jsonify({"ok": False, "error": "server_error"}), 500
@@ -230,9 +247,6 @@ def create_app():
     @login_required
     def download_contract_file(file_id: int):
         f = ContractFile.query.get_or_404(file_id)
-
-        if f.approval_status != 'approved' and getattr(current_user, 'role', None) not in {'director', 'zamdirector', 'deputy_director'}:
-            abort(403, description='Файл еще не подтвержден.')
 
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -248,13 +262,40 @@ def create_app():
         if not key:
             abort(404)
 
-        signed = sb.storage.from_(bucket).create_signed_url(key, 60, {"download": f.original_name or "document.pdf"})
+        signed = sb.storage.from_(bucket).create_signed_url(key, 60)
         signed_url = signed.get("signedURL") or signed.get("signedUrl")
 
         if not signed_url:
             abort(404)
 
         return redirect(signed_url)
+
+
+    @app.get("/admin/audit-logs")
+    @login_required
+    @require_roles("director", "zamdirector", "deputy_director")
+    def admin_audit_logs():
+        q = AuditLog.query.order_by(AuditLog.created_at.desc())
+        username = (request.args.get('username') or '').strip()
+        action = (request.args.get('action') or '').strip()
+        search = (request.args.get('q') or '').strip()
+        if username:
+            q = q.filter(AuditLog.username.ilike(f'%{username}%'))
+        if action:
+            q = q.filter(AuditLog.action.ilike(f'%{action}%'))
+        if search:
+            q = q.filter(AuditLog.message.ilike(f'%{search}%'))
+        logs = q.limit(500).all()
+        return render_template('admin_audit_logs.html', logs=logs)
+
+    @app.get("/admin/backup/download")
+    @login_required
+    @require_roles("director", "zamdirector", "deputy_director")
+    def admin_backup_download():
+        bundle, filename, manifest = build_backup_zip(include_files=app.config.get('BACKUP_INCLUDE_FILES', True))
+        log_audit('backup_download', f'Скачан backup. Таблиц: {len(manifest.get("tables", {}))}, файлов: {manifest.get("files_exported", 0)}')
+        db.session.commit()
+        return send_file(bundle, as_attachment=True, download_name=filename, mimetype='application/zip')
 
     @app.post("/admin/send-daily-report")
     @login_required

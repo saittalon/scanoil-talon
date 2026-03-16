@@ -13,15 +13,17 @@ QR код на талоне содержит код талона. Отправь
 .
 
 
-## Security settings
+## Логи и backup
 
-Set these variables in Railway / Render / server:
+- В панели директора появился раздел **Логи и backup**.
+- Там можно смотреть журнал действий пользователей и скачивать backup ZIP.
+- Backup содержит JSON/CSV дампы таблиц базы и, если включён `BACKUP_INCLUDE_FILES=1`, PDF-файлы из Supabase Storage.
+- Логи приложения пишутся в `logs/app.log`.
 
-- `SECRET_KEY` = long random string
-- `DIRECTOR_PASSWORD` = strong password for director
-- `DEPUTY_PASSWORD` = strong password for deputy director
-- `EXECUTOR_PASSWORD` = strong password for executor
-- `SESSION_COOKIE_SECURE=1`
-- `MAX_CONTENT_LENGTH=10485760`
+### Ручной backup из консоли
 
-Important: if users already exist in the database, passwords are not overwritten unless you explicitly set the environment variables above.
+```bash
+python scripts/run_backup.py
+```
+
+Архив сохранится в папку `backups/` или в путь из `BACKUP_OUTPUT_DIR`.

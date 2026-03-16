@@ -117,10 +117,19 @@
     </div>
 
     <style>
-      .talon-folder{padding:14px 16px;}
-      .talon-folder-summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:16px;align-items:center;font-weight:700;}
+      .talon-folder-list{display:grid;gap:14px;}
+      .talon-folder{padding:0;border:1px solid rgba(173,196,255,.16)!important;background:linear-gradient(180deg, rgba(12,22,54,.98), rgba(9,17,42,.98))!important;overflow:hidden;}
+      .talon-folder-summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:16px;align-items:center;font-weight:700;padding:16px 18px;color:#e7efff;background:rgba(255,255,255,.03);}
       .talon-folder-summary::-webkit-details-marker{display:none;}
-      .talon-folder[open] .talon-folder-summary{margin-bottom:10px;}
+      .talon-folder-summary:hover{background:rgba(255,255,255,.05);}
+      .talon-folder[open] .talon-folder-summary{border-bottom:1px solid rgba(173,196,255,.12);}
+      .talon-folder .table-responsive{padding:12px 16px 16px;}
+      .talon-folder .table{margin-bottom:0;color:#e7efff;--bs-table-color:#e7efff;--bs-table-bg:transparent;--bs-table-border-color:rgba(173,196,255,.12);}
+      .talon-folder .table thead th{color:#bdd0ff;background:rgba(255,255,255,.03);}
+      .talon-folder .table tbody td{color:#e7efff;background:transparent;}
+      .talon-folder .table a{color:#cfe0ff;}
+      .talon-folder .badge{font-size:.78rem;}
+      .talon-folder-hint{opacity:.85;}
     </style>
 
 <div class="modal fade" id="addTalonsModal" tabindex="-1" aria-hidden="true">

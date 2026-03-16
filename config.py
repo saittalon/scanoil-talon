@@ -39,3 +39,7 @@ class Config:
     PERMANENT_SESSION_LIFETIME = int(os.getenv("PERMANENT_SESSION_LIFETIME", str(60 * 60 * 8)))
     APP_LOG_FILE = os.getenv("APP_LOG_FILE", "logs/app.log")
     BACKUP_INCLUDE_FILES = os.getenv("BACKUP_INCLUDE_FILES", "1") == "1"
+    BACKUP_UPLOAD_TO_SUPABASE = os.getenv("BACKUP_UPLOAD_TO_SUPABASE", "1") == "1"
+    BACKUP_SUPABASE_BUCKET = os.getenv("BACKUP_SUPABASE_BUCKET", "backups")
+    BACKUP_SUPABASE_PATH = os.getenv("BACKUP_SUPABASE_PATH", "auto").strip('/ ')
+    BACKUP_KEEP_LAST = int(os.getenv("BACKUP_KEEP_LAST", "30"))

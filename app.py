@@ -10,7 +10,7 @@ from flask_login import LoginManager, login_required
 from supabase import create_client
 
 from config import Config
-from backup_utils import build_backup_zip
+from backup_utils import build_backup_zip, upload_backup_bytes_to_supabase
 from models import (
     db,
     User, Talon, BotSession, TalonRedemption, WebAppToken,
@@ -203,6 +203,8 @@ def create_app():
             "talon_status_label": talon_status_label,
             "format_kz": format_kz,
             "csrf_token": get_csrf_token,
+            "cloud_backup_enabled": app.config.get('BACKUP_UPLOAD_TO_SUPABASE', True),
+            "cloud_backup_bucket": app.config.get('BACKUP_SUPABASE_BUCKET', 'backups'),
         }
 
     app.register_blueprint(auth_bp)
@@ -296,6 +298,23 @@ def create_app():
         log_audit('backup_download', f'Скачан backup. Таблиц: {len(manifest.get("tables", {}))}, файлов: {manifest.get("files_exported", 0)}')
         db.session.commit()
         return send_file(bundle, as_attachment=True, download_name=filename, mimetype='application/zip')
+
+    @app.post("/admin/backup/upload-cloud")
+    @login_required
+    @require_roles("director", "zamdirector", "deputy_director")
+    def admin_backup_upload_cloud():
+        bundle, filename, manifest = build_backup_zip(include_files=app.config.get('BACKUP_INCLUDE_FILES', True))
+        result = upload_backup_bytes_to_supabase(
+            bundle_bytes=bundle.getvalue(),
+            filename=filename,
+            bucket=app.config.get('BACKUP_SUPABASE_BUCKET', 'backups'),
+            base_path=app.config.get('BACKUP_SUPABASE_PATH', 'auto'),
+            keep_last=app.config.get('BACKUP_KEEP_LAST', 30),
+        )
+        log_audit('backup_cloud_upload_manual', f'Backup вручную загружен в облако: {result["bucket"]}/{result["key"]}. Таблиц: {len(manifest.get("tables", {}))}, файлов: {manifest.get("files_exported", 0)}')
+        db.session.commit()
+        flash(f'Бэкап загружен в облако: {result["bucket"]}/{result["key"]}', 'success')
+        return redirect(url_for('admin_audit_logs'))
 
     @app.post("/admin/send-daily-report")
     @login_required

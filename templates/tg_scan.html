@@ -110,7 +110,6 @@
       display: none;
     }
 
-    /* Прозрачный слой для первого касания, чтобы Telegram разрешил звук */
     #tapUnlock {
       position: fixed;
       inset: 0;
@@ -136,7 +135,6 @@
     <div id="tapUnlock"></div>
   </div>
 
-  <!-- Если успех/ошибка перепутаны, просто поменяй эти два файла местами -->
   <audio id="okAudio" src="{{ url_for('static', filename='scan.wav') }}" preload="auto"></audio>
   <audio id="errAudio" src="{{ url_for('static', filename='error.wav') }}" preload="auto"></audio>
 
@@ -331,6 +329,7 @@
         }
 
         if (data.error === "expired") {
+          playErr();
           showResult(
             "error",
             "Срок действия талона истёк",

@@ -59,7 +59,6 @@ def _main_keyboard(scan_url: str | None = None):
     else:
         rows.append([KeyboardButton("📷 СКАНИРОВАТЬ")])
 
-    rows.append([KeyboardButton("⌨️ ВВЕСТИ КОД")])
     rows.append([KeyboardButton("📋 МЕНЮ")])
     rows.append([KeyboardButton("🔴 ЗАКРЫТЬ СМЕНУ")])
     rows.append([KeyboardButton("🚪 ВЫЙТИ")])

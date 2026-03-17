@@ -400,9 +400,12 @@ def create_app():
         if not token or not code:
             return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
 
-        ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())
-        if not ok:
-            return jsonify({"ok": False, "error": "invalid_telegram_context", "reason": reason}), 401
+        tg_user = None
+        if init_data:
+            ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())
+            if not ok:
+                current_app.logger.warning('Telegram initData invalid for /tg/api/scan: %s', reason)
+                tg_user = None
 
         t = WebAppToken.query.filter_by(token=token).first()
         if t is None:
@@ -422,7 +425,7 @@ def create_app():
                 return jsonify({"ok": False, "error": "token_expired"}), 401
 
         tg_user_id = str((tg_user or {}).get('id') or '')
-        if not tg_user_id or tg_user_id != str(t.telegram_user_id):
+        if tg_user_id and tg_user_id != str(t.telegram_user_id):
             return jsonify({"ok": False, "error": "telegram_user_mismatch"}), 401
 
         sess = BotSession.query.filter_by(

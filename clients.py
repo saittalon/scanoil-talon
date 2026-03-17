@@ -327,6 +327,8 @@ def client_contracts(client_id):
             selected = Contract.query.filter_by(client_id=client.id, id=cid_int).first()
         except ValueError:
             selected = None
+    if selected is None and contracts:
+        selected = contracts[0]
 
     balance_requests = []
     if selected:

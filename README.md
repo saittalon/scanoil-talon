@@ -50,3 +50,6 @@ python scripts/run_backup.py
 ```
 
 Архив сохранится в папку `backups/` или в путь из `BACKUP_OUTPUT_DIR`, а при включённом `BACKUP_UPLOAD_TO_SUPABASE=1` ещё и загрузится в Supabase Storage.
+
+- Дополнительно создаётся Excel backup (`.xlsx`) с отдельными листами по каждой таблице.
+- Если включён `BACKUP_CREATE_EXCEL=1`, Excel-файл сохраняется локально и загружается в Supabase Storage вместе с ZIP.

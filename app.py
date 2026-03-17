@@ -6,6 +6,8 @@ from sqlalchemy import text
 from flask import (
     Flask, redirect, url_for, request, jsonify, render_template, abort, flash, send_file, g
 )
+from urllib.request import Request, urlopen
+import json as _json
 from flask_login import LoginManager, login_required
 from supabase import create_client
 
@@ -340,10 +342,10 @@ def create_app():
             return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
 
         tg_user = None
-        init_data_valid = False
         if init_data:
             ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())
-            init_data_valid = ok
+            if not ok:
+                return jsonify({"ok": False, "error": "invalid_telegram_context", "reason": reason}), 401
 
         t = WebAppToken.query.filter_by(token=token).first()
         if t is None:
@@ -362,11 +364,9 @@ def create_app():
             if expires_at < now_naive_utc:
                 return jsonify({"ok": False, "error": "token_expired"}), 401
 
-        tg_user_id = str(t.telegram_user_id or '')
-        if init_data_valid:
-            tg_user_id = str((tg_user or {}).get('id') or '')
-            if not tg_user_id or tg_user_id != str(t.telegram_user_id):
-                return jsonify({"ok": False, "error": "telegram_user_mismatch"}), 401
+        tg_user_id = str((tg_user or {}).get('id') or t.telegram_user_id or '')
+        if str(tg_user_id) != str(t.telegram_user_id):
+            return jsonify({"ok": False, "error": "telegram_user_mismatch"}), 401
 
         sess = BotSession.query.filter_by(
             telegram_user_id=t.telegram_user_id,
@@ -418,6 +418,31 @@ def create_app():
         log_audit('telegram_scan_success', f'Талон {talon.serial_number} использован через Telegram WebApp', 'talon', talon.id)
         db.session.commit()
 
+        price = 0.0
+        if talon.contract and talon.contract.price_per_liter is not None:
+            price = float(talon.contract.price_per_liter or 0)
+        amount = float(talon.liters or 0) * price
+
+        bot_token = os.getenv("BOT_TOKEN", "").strip()
+        if bot_token and t.telegram_user_id:
+            status_text = (
+                f"✅ Талон принят\n"
+                f"Талон: №{talon.serial_number or '—'}\n"
+                f"Код: {talon.code or code}\n"
+                f"Время: {format_kz(used_time)}\n"
+                f"АГЗС: {sess.agzs.name if sess.agzs else '—'}\n"
+                f"Товар: {talon.product_name or '—'}\n"
+                f"Литры: {float(talon.liters or 0):.2f} л\n"
+                f"Сумма: {amount:,.2f} ₸".replace(",", " ")
+            )
+            try:
+                payload = _json.dumps({"chat_id": str(t.telegram_user_id), "text": status_text}).encode("utf-8")
+                req = Request(f"https://api.telegram.org/bot{bot_token}/sendMessage", data=payload, headers={"Content-Type": "application/json"})
+                with urlopen(req, timeout=10) as _resp:
+                    _resp.read()
+            except Exception:
+                app.logger.exception("Failed to send scan result to Telegram chat")
+
         return jsonify({
             "ok": True,
             "liters": getattr(talon, "liters", None),
@@ -426,6 +451,7 @@ def create_app():
             "valid_from": str(getattr(talon, "valid_from", "")),
             "valid_to": str(getattr(talon, "valid_to", "")),
             "agzs": sess.agzs.name if sess.agzs else None,
+            "amount": amount,
         })
 
     return app

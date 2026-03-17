@@ -26,7 +26,7 @@ from helpers import kz_now, to_kz, redeem_talon_atomic
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 WEBAPP_BASE_URL = os.getenv("WEBAPP_BASE_URL", "").strip().rstrip("/")
 
-LOGIN, PASSWORD, ENTER_CODE = range(3)
+LOGIN, PASSWORD = range(2)
 
 
 def _auth_keyboard():
@@ -356,86 +356,6 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Вы вышли", reply_markup=_auth_keyboard())
 
 
-async def enter_code_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    app = context.application.bot_data["flask_app"]
-
-    with app.app_context():
-        sess = _get_session(update.effective_user.id)
-
-        if not sess:
-            has_session = False
-            has_open_shift = False
-        else:
-            has_session = True
-            has_open_shift = _get_open_shift_for_agzs(sess.agzs_id) is not None
-
-    if not has_session:
-        await update.message.reply_text("Сначала войдите", reply_markup=_auth_keyboard())
-        return ConversationHandler.END
-
-    if not has_open_shift:
-        await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
-        return ConversationHandler.END
-
-    await update.message.reply_text("Введите код талона:")
-    return ENTER_CODE
-
-
-async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    code = _only_digits(update.message.text)
-    if not code:
-        await update.message.reply_text("❌ Неверный код")
-        return ENTER_CODE
-
-    app = context.application.bot_data["flask_app"]
-
-    with app.app_context():
-        sess = _get_session(update.effective_user.id)
-        if not sess:
-            await update.message.reply_text("Сначала войдите")
-            return ConversationHandler.END
-
-        shift = _get_open_shift_for_agzs(sess.agzs_id)
-        if not shift:
-            await update.message.reply_text("Сначала откройте смену", reply_markup=_shift_keyboard())
-            return ConversationHandler.END
-
-        used_time = kz_now()
-        redeem_status, talon = redeem_talon_atomic(
-            code=code,
-            used_at=used_time,
-            agzs_id=sess.agzs_id,
-            telegram_user_id=str(sess.telegram_user_id),
-        )
-        if redeem_status == "not_found":
-            await update.message.reply_text("❌ Талон не найден")
-            return ConversationHandler.END
-
-        if redeem_status == "expired":
-            await update.message.reply_text("❌ Срок действия талона истек")
-            return ConversationHandler.END
-
-        if redeem_status == "already_used":
-            await update.message.reply_text("❌ Талон уже использован")
-            return ConversationHandler.END
-
-        if redeem_status != "redeemed":
-            await update.message.reply_text("❌ Талон недоступен")
-            return ConversationHandler.END
-
-        db.session.add(TalonRedemption(
-            talon_id=talon.id,
-            agzs_id=sess.agzs_id,
-            telegram_user_id=str(sess.telegram_user_id),
-            used_at=used_time,
-            source="telegram"
-        ))
-        db.session.commit()
-
-    scan_url = _make_scan_url(app, update.effective_user.id)
-    await update.message.reply_text("✅ Талон принят", reply_markup=_main_keyboard(scan_url))
-    return ConversationHandler.END
-
 
 async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app = context.application.bot_data["flask_app"]
@@ -577,7 +497,7 @@ async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if talon_lines:
             report += "Талоны:\n" + "\n".join(talon_lines)
         else:
-            report += "Сегодня талоны не использовали"
+            report += f"Общая сумма: {_format_money(0)} ₸\n\nСегодня талоны не использовали"
 
         shift.report_text = report
         db.session.commit()
@@ -637,13 +557,6 @@ def main():
         fallbacks=[CommandHandler("start", start)],
     ))
 
-    application.add_handler(ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex(r"^⌨️ ВВЕСТИ КОД$"), enter_code_begin)],
-        states={
-            ENTER_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_code_got)],
-        },
-        fallbacks=[CommandHandler("start", start)],
-    ))
 
     application.add_handler(MessageHandler(filters.Regex(r"^🟢 ОТКРЫТЬ СМЕНУ$"), open_shift))
     application.add_handler(MessageHandler(filters.Regex(r"^📋 МЕНЮ$"), show_menu))

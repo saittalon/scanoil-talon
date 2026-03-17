@@ -103,89 +103,93 @@ def balance_set(client_id):
         bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id).first()
 
     old_liters = float(bal.liters_left or 0) if bal else 0.0
-delta_liters = liters_left - old_liters
+    delta_liters = liters_left - old_liters
 
-if can_approve_balances():
-    if bal is None:
-        bal = Balance(client_id=client.id, contract_id=contract_id, product_name=product_name)
-        db.session.add(bal)
+    if can_approve_balances():
+        if bal is None:
+            bal = Balance(
+                client_id=client.id,
+                contract_id=contract_id,
+                product_name=product_name
+            )
+            db.session.add(bal)
 
-    bal.product_name = product_name
-    bal.liters_left = liters_left
-    bal.balance_control = balance_control
-    bal.updated_at = datetime.utcnow()
+        bal.product_name = product_name
+        bal.liters_left = liters_left
+        bal.balance_control = balance_control
+        bal.updated_at = datetime.utcnow()
+
+        log_audit(
+            "balance_set",
+            f"{current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}: "
+            f"{old_liters:.2f} -> {liters_left:.2f}",
+            "client",
+            client.id
+        )
+        db.session.commit()
+
+        notify_event(
+            "Обновлен остаток",
+            f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}"
+        )
+        flash("Остаток обновлён.", "success")
+        return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+
+    existing_pending = (
+        BalanceChangeRequest.query
+        .filter_by(client_id=client.id, contract_id=contract_id, status="pending")
+        .order_by(BalanceChangeRequest.id.desc())
+        .first()
+    )
+
+    if existing_pending:
+        existing_pending.balance_id = bal.id if bal else None
+        existing_pending.product_name = product_name
+        existing_pending.old_liters = old_liters
+        existing_pending.requested_liters = liters_left
+        existing_pending.delta_liters = delta_liters
+        existing_pending.balance_control = balance_control
+        existing_pending.comment = comment
+        existing_pending.requested_by_user_id = current_user.id
+        existing_pending.created_at = datetime.utcnow()
+
+        log_audit(
+            "balance_request_update",
+            f"{current_user.username} обновил pending-заявку по договору #{contract_id} клиента {client.name}",
+            "client",
+            client.id
+        )
+        db.session.commit()
+        flash("Заявка уже существовала и была обновлена.", "success")
+        return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+
+    req = BalanceChangeRequest(
+        client_id=client.id,
+        contract_id=contract_id,
+        balance_id=bal.id if bal else None,
+        requested_by_user_id=current_user.id,
+        product_name=product_name,
+        old_liters=old_liters,
+        requested_liters=liters_left,
+        delta_liters=delta_liters,
+        balance_control=balance_control,
+        comment=comment,
+        status="pending",
+        created_at=datetime.utcnow(),
+    )
+    db.session.add(req)
 
     log_audit(
-        "balance_set",
-        f"{current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}: "
+        "balance_request_create",
+        f"{current_user.username} отправил заявку на изменение остатка по договору #{contract_id} клиента {client.name}: "
         f"{old_liters:.2f} -> {liters_left:.2f}",
         "client",
         client.id
     )
+
     db.session.commit()
-
-    notify_event(
-        "Обновлен остаток",
-        f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}"
-    )
-    flash("Остаток обновлён.", "success")
+    flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
-
-existing_pending = (
-    BalanceChangeRequest.query
-    .filter_by(client_id=client.id, contract_id=contract_id, status="pending")
-    .order_by(BalanceChangeRequest.id.desc())
-    .first()
-)
-
-if existing_pending:
-    existing_pending.balance_id = bal.id if bal else None
-    existing_pending.product_name = product_name
-    existing_pending.old_liters = old_liters
-    existing_pending.requested_liters = liters_left
-    existing_pending.delta_liters = delta_liters
-    existing_pending.balance_control = balance_control
-    existing_pending.comment = comment
-    existing_pending.requested_by_user_id = current_user.id
-    existing_pending.created_at = datetime.utcnow()
-
-    log_audit(
-        "balance_request_update",
-        f"{current_user.username} обновил pending-заявку по договору #{contract_id} клиента {client.name}",
-        "client",
-        client.id
-    )
-    db.session.commit()
-    flash("Заявка уже существовала и была обновлена.", "success")
-    return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
-
-req = BalanceChangeRequest(
-    client_id=client.id,
-    contract_id=contract_id,
-    balance_id=bal.id if bal else None,
-    requested_by_user_id=current_user.id,
-    product_name=product_name,
-    old_liters=old_liters,
-    requested_liters=liters_left,
-    delta_liters=delta_liters,
-    balance_control=balance_control,
-    comment=comment,
-    status="pending",
-    created_at=datetime.utcnow(),
-)
-db.session.add(req)
-
-log_audit(
-    "balance_request_create",
-    f"{current_user.username} отправил заявку на изменение остатка по договору #{contract_id} клиента {client.name}: "
-    f"{old_liters:.2f} -> {liters_left:.2f}",
-    "client",
-    client.id
-)
-
-db.session.commit()
-flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
-return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
 
 @clients_bp.post("/balance-requests/<int:request_id>/approve")

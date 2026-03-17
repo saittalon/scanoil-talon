@@ -612,64 +612,6 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📋 Меню открыто", reply_markup=_main_keyboard(scan_url))
 
 
-async def webapp_data_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    app = context.application.bot_data["flask_app"]
-    web_app_data = getattr(update.effective_message, "web_app_data", None)
-    raw = web_app_data.data if web_app_data else ""
-
-    try:
-        import json
-        data = json.loads(raw)
-    except Exception:
-        return
-
-    kind = (data.get("kind") or "").strip()
-    code = (data.get("code") or "—").strip()
-    agzs = (data.get("agzs") or "—").strip()
-    time_text = (data.get("time") or "—").strip()
-    serial = (data.get("serial") or "—").strip()
-    liters = data.get("liters")
-    product = (data.get("product") or "").strip()
-    used_at = (data.get("used_at") or "—").strip()
-    valid_to = (data.get("valid_to") or "—").strip()
-
-    if kind == "accepted":
-        text = (
-            f"✅ Талон принят\n"
-            f"№ талона: {serial}\n"
-            f"Код: {code}\n"
-            f"Время: {time_text}\n"
-            f"АГЗС: {agzs}"
-        )
-        if liters not in (None, ""):
-            text += f"\nОбъем: {liters} л"
-        if product:
-            text += f"\nТопливо: {product}"
-    elif kind == "already_used":
-        text = (
-            f"❌ Талон уже использован\n"
-            f"Код: {code}\n"
-            f"Дата и время использования: {used_at}\n"
-            f"АГЗС: {agzs}"
-        )
-    elif kind == "expired":
-        text = (
-            f"❌ Срок действия талона истек\n"
-            f"Код: {code}\n"
-            f"Действовал до: {valid_to}"
-        )
-    elif kind == "not_found":
-        text = f"❌ Талон не найден\nКод: {code}"
-    elif kind == "error":
-        text = f"❌ Ошибка проверки талона\nКод: {code}"
-    else:
-        return
-
-    with app.app_context():
-        scan_url = _make_scan_url(app, update.effective_user.id)
-    await update.message.reply_text(text, reply_markup=_main_keyboard(scan_url))
-
-
 async def scan_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await scan(update, context)
 
@@ -695,8 +637,14 @@ def main():
         fallbacks=[CommandHandler("start", start)],
     ))
 
+    application.add_handler(ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex(r"^⌨️ ВВЕСТИ КОД$"), enter_code_begin)],
+        states={
+            ENTER_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_code_got)],
+        },
+        fallbacks=[CommandHandler("start", start)],
+    ))
 
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, webapp_data_received))
     application.add_handler(MessageHandler(filters.Regex(r"^🟢 ОТКРЫТЬ СМЕНУ$"), open_shift))
     application.add_handler(MessageHandler(filters.Regex(r"^📋 МЕНЮ$"), show_menu))
     application.add_handler(MessageHandler(filters.Regex(r"^🔴 ЗАКРЫТЬ СМЕНУ$"), close_shift))

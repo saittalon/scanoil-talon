@@ -340,10 +340,10 @@ def create_app():
             return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
 
         tg_user = None
+        init_data_valid = False
         if init_data:
             ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())
-            if not ok:
-                return jsonify({"ok": False, "error": "invalid_telegram_context", "reason": reason}), 401
+            init_data_valid = ok
 
         t = WebAppToken.query.filter_by(token=token).first()
         if t is None:
@@ -362,9 +362,11 @@ def create_app():
             if expires_at < now_naive_utc:
                 return jsonify({"ok": False, "error": "token_expired"}), 401
 
-        tg_user_id = str((tg_user or {}).get('id') or str(t.telegram_user_id) or '')
-        if not tg_user_id or tg_user_id != str(t.telegram_user_id):
-            return jsonify({"ok": False, "error": "telegram_user_mismatch"}), 401
+        tg_user_id = str(t.telegram_user_id or '')
+        if init_data_valid:
+            tg_user_id = str((tg_user or {}).get('id') or '')
+            if not tg_user_id or tg_user_id != str(t.telegram_user_id):
+                return jsonify({"ok": False, "error": "telegram_user_mismatch"}), 401
 
         sess = BotSession.query.filter_by(
             telegram_user_id=t.telegram_user_id,
@@ -385,11 +387,7 @@ def create_app():
             return jsonify({"ok": False, "error": "talon_not_found"}), 404
 
         if redeem_status == "expired":
-            return jsonify({
-                "ok": False,
-                "error": "expired",
-                "valid_to": str(getattr(talon, "valid_to", "") or ""),
-            }), 409
+            return jsonify({"ok": False, "error": "expired"}), 409
 
         if redeem_status == "already_used":
             last = (
@@ -398,11 +396,10 @@ def create_app():
                 .order_by(TalonRedemption.used_at.desc())
                 .first()
             )
-            used_at_value = last.used_at if last and last.used_at else talon.used_at
             return jsonify({
                 "ok": False,
                 "error": "already_used",
-                "used_at": format_kz(used_at_value) if used_at_value else None,
+                "used_at": last.used_at.isoformat() if last and last.used_at else talon.used_at.isoformat() if talon.used_at else None,
                 "agzs": last.agzs.name if last and last.agzs else talon.used_agzs.name if talon.used_agzs else None,
             }), 409
 

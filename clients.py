@@ -15,7 +15,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from models import db, Client, Contract, Balance, Talon, ContractFile, TalonRedemption
+from models import db, Client, Contract, Balance, BalanceChangeRequest, Talon, ContractFile, TalonRedemption
 from helpers import has_role, require_roles, talon_status, talon_status_label, format_kz, kz_today, kz_now, redeem_talon_atomic
 from reports import dashboard_month_links
 from mail_utils import notify_event
@@ -28,11 +28,11 @@ def is_admin():
     return has_role("director", "zamdirector", "deputy_director")
 
 
-def can_manage_clients():
+def can_edit_balances():
     return has_role("director", "zamdirector", "deputy_director", "executor", "operator")
 
 
-def can_edit_balances():
+def can_approve_balances():
     return has_role("director", "zamdirector", "deputy_director")
 
 
@@ -167,8 +167,8 @@ def list_clients():
 @clients_bp.get("/clients/new", endpoint="new_client")
 @login_required
 def client_new_get():
-    if not can_manage_clients():
-        flash("Недостаточно прав для добавления клиента", "warning")
+    if not is_admin():
+        flash("Только админ может добавлять клиентов", "warning")
         return redirect(url_for("clients.list_clients"))
     return render_template("client_new.html")
 
@@ -176,8 +176,8 @@ def client_new_get():
 @clients_bp.post("/clients/new", endpoint="new_client_post")
 @login_required
 def client_new_post():
-    if not can_manage_clients():
-        flash("Недостаточно прав для добавления клиента", "warning")
+    if not is_admin():
+        flash("Только админ может добавлять клиентов", "warning")
         return redirect(url_for("clients.list_clients"))
 
     name = request.form.get("name", "").strip()
@@ -262,6 +262,15 @@ def client_contracts(client_id):
         except ValueError:
             selected = None
 
+    pending_balance_requests = []
+    if selected:
+        pending_balance_requests = (
+            BalanceChangeRequest.query
+            .filter_by(contract_id=selected.id, status="pending")
+            .order_by(BalanceChangeRequest.created_at.desc())
+            .all()
+        )
+
     return render_template(
         "client_contracts.html",
         client=client,
@@ -271,6 +280,7 @@ def client_contracts(client_id):
         active_tab="contract",
         timedelta=timedelta,
         current_role=current_user.role,
+        pending_balance_requests=pending_balance_requests,
     )
 
 
@@ -419,6 +429,68 @@ def contract_edit_post(client_id, contract_id):
     )
     flash("Договор обновлён.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract.id))
+
+
+@clients_bp.post("/balance-requests/<int:request_id>/approve")
+@login_required
+def approve_balance_request(request_id):
+    if not can_approve_balances():
+        flash("Недостаточно прав.", "danger")
+        return redirect(request.referrer or url_for("clients.list_clients"))
+
+    req = BalanceChangeRequest.query.get_or_404(request_id)
+    if req.status != "pending":
+        flash("Этот запрос уже обработан.", "warning")
+        return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
+
+    bal = Balance.query.filter_by(
+        client_id=req.client_id,
+        contract_id=req.contract_id,
+        product_name=req.product_name,
+    ).first()
+    if bal is None:
+        bal = Balance(
+            client_id=req.client_id,
+            contract_id=req.contract_id,
+            product_name=req.product_name,
+            liters_left=req.requested_liters,
+            balance_control=req.balance_control,
+            updated_at=datetime.utcnow(),
+        )
+        db.session.add(bal)
+    else:
+        bal.liters_left = req.requested_liters
+        bal.balance_control = req.balance_control
+        bal.updated_at = datetime.utcnow()
+
+    req.status = "approved"
+    req.approved_by_user_id = current_user.id
+    req.decided_at = datetime.utcnow()
+    db.session.commit()
+
+    flash("Запрос на изменение остатка подтвержден.", "success")
+    return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
+
+
+@clients_bp.post("/balance-requests/<int:request_id>/reject")
+@login_required
+def reject_balance_request(request_id):
+    if not can_approve_balances():
+        flash("Недостаточно прав.", "danger")
+        return redirect(request.referrer or url_for("clients.list_clients"))
+
+    req = BalanceChangeRequest.query.get_or_404(request_id)
+    if req.status != "pending":
+        flash("Этот запрос уже обработан.", "warning")
+        return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
+
+    req.status = "rejected"
+    req.approved_by_user_id = current_user.id
+    req.decided_at = datetime.utcnow()
+    db.session.commit()
+
+    flash("Запрос на изменение остатка отклонен.", "warning")
+    return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
 
 
 # ---------------- Талоны ----------------
@@ -741,64 +813,6 @@ def talon_extend(talon_id):
     )
     flash("Срок действия талона продлен.", "success")
     return redirect(url_for("clients.client_talons", client_id=t.client_id, status="active"))
-
-
-@clients_bp.post("/clients/<int:client_id>/talons/delete-period", endpoint="talons_delete_period")
-@login_required
-def talons_delete_period(client_id):
-    client = Client.query.get_or_404(client_id)
-
-    if not has_role("director", "zamdirector", "deputy_director"):
-        flash("Недостаточно прав для удаления талонов.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=client.id))
-
-    try:
-        valid_from = datetime.strptime((request.form.get("valid_from") or "").strip(), "%Y-%m-%d").date()
-        valid_to = datetime.strptime((request.form.get("valid_to") or "").strip(), "%Y-%m-%d").date()
-    except Exception:
-        flash("Укажите период удаления талонов.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=client.id))
-
-    liters_raw = (request.form.get("liters") or "").strip()
-    liters = None
-    if liters_raw:
-        try:
-            liters = float(liters_raw.replace(",", "."))
-        except ValueError:
-            flash("Неверный номинал для удаления.", "danger")
-            return redirect(url_for("clients.client_talons", client_id=client.id, status="active"))
-
-    q = Talon.query.filter_by(client_id=client.id).filter(
-        Talon.valid_from == valid_from,
-        Talon.valid_to == valid_to,
-        Talon.state != "used",
-    )
-    if liters is not None:
-        q = q.filter(Talon.liters == liters)
-
-    talons = q.all()
-    if not talons:
-        flash("По выбранному периоду талоны не найдены.", "warning")
-        return redirect(url_for("clients.client_talons", client_id=client.id, status="active"))
-
-    deleted = 0
-    restored = 0.0
-    for t in talons:
-        if t.contract_id:
-            bal = Balance.query.filter_by(client_id=t.client_id, contract_id=t.contract_id, product_name=t.product_name).first()
-            if bal is None:
-                bal = Balance.query.filter_by(client_id=t.client_id, contract_id=t.contract_id).first()
-            if bal is not None:
-                bal.liters_left = float(bal.liters_left or 0) + float(t.liters or 0)
-                bal.updated_at = datetime.utcnow()
-                restored += float(t.liters or 0)
-        db.session.delete(t)
-        deleted += 1
-
-    log_audit("delete_talons_period", f"{current_user.username} удалил {deleted} талонов клиента {client.name} за период {valid_from} - {valid_to}", "client", client.id)
-    db.session.commit()
-    flash(f"Удалено талонов: {deleted}. Возвращено в остаток: {restored:.2f} л", "success")
-    return redirect(url_for("clients.client_talons", client_id=client.id, status="active"))
 
 
 @clients_bp.post("/talons/<int:talon_id>/delete")

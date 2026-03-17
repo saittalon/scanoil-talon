@@ -103,6 +103,7 @@ def balance_set(client_id):
         bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id).first()
 
     old_liters = float(bal.liters_left or 0) if bal else 0.0
+    delta_liters = liters_left - old_liters
 
     if can_approve_balances():
         if bal is None:
@@ -126,6 +127,7 @@ def balance_set(client_id):
         product_name=product_name,
         old_liters=old_liters,
         requested_liters=liters_left,
+        delta_liters=delta_liters,
         balance_control=balance_control,
         comment=comment,
         status="pending",
@@ -638,6 +640,15 @@ def client_talons_add(client_id):
             flash("Выбранное доп. соглашение не подтверждено.", "danger")
             return redirect(url_for("clients.client_talons", client_id=client.id))
 
+    pending_balance_request = (
+        BalanceChangeRequest.query
+        .filter_by(client_id=client.id, contract_id=contract.id, status="pending")
+        .first()
+    )
+    if pending_balance_request:
+        flash("Есть неподтвержденная заявка на изменение остатка. Сначала дождитесь подтверждения или отклонения.", "danger")
+        return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract.id))
+
     try:
         liters = float((request.form.get("liters") or "0").replace(",", "."))
     except ValueError:
@@ -662,10 +673,9 @@ def client_talons_add(client_id):
     valid_from = parse_date(request.form.get("valid_from") or "")
     valid_to = parse_date(request.form.get("valid_to") or "")
 
-    if not valid_from:
-        valid_from = kz_today()
-    if not valid_to:
-        valid_to = valid_from + timedelta(days=60)
+    if not valid_from or not valid_to:
+        flash("Для создания талонов обязательно укажите период действия: дату начала и дату окончания.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
 
     if valid_to < valid_from:
         flash("Дата окончания не может быть раньше даты начала.", "danger")

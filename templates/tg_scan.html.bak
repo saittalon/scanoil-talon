@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сканер талонов</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#0b1320;color:#fff}
+    .wrap{max-width:680px;margin:0 auto;padding:16px}
+    .card{background:#111c30;border-radius:22px;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+    h1{font-size:28px;line-height:1.2;margin:0 0 10px}
+    p{margin:0 0 14px;opacity:.95;font-size:18px;line-height:1.45}
+    .video-wrap{position:relative;border-radius:18px;overflow:hidden;background:#000;min-height:280px}
+    video{width:100%;height:auto;display:block;background:#000}
+    .frame{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .box{
+      width:72%;
+      aspect-ratio:1/1;
+      border:4px solid rgba(255,255,255,.9);
+      border-radius:18px;
+      box-shadow:0 0 0 9999px rgba(0,0,0,.25);
+      transition:border-color .25s ease, box-shadow .25s ease, transform .15s ease;
+    }
+    .status{
+      margin-top:14px;
+      padding:14px 16px;
+      border-radius:16px;
+      background:#0f1a2e;
+      font-size:18px;
+      line-height:1.4;
+      border:2px solid rgba(255,255,255,.08);
+      transition:background .2s ease,border-color .2s ease,color .2s ease;
+    }
+    .status.ok{
+      border-color:rgba(36,161,72,.55);
+      background:rgba(36,161,72,.12);
+    }
+    .status.error{
+      border-color:rgba(255,90,90,.55);
+      background:rgba(255,90,90,.12);
+    }
+    .status.wait{
+      border-color:rgba(255,255,255,.08);
+      background:#0f1a2e;
+    }
+    .statusIcon{
+      font-size:42px;
+      line-height:1;
+      margin-bottom:8px;
+    }
+    .btn{width:100%;margin-top:14px;padding:18px 16px;border-radius:18px;border:0;background:#24a148;color:#fff;font-weight:800;font-size:28px;line-height:1.15;cursor:pointer}
+    .btn.secondary{background:#3b82f6;font-size:20px}
+    .btn.manual{background:#f59e0b;color:#111827;font-size:22px}
+    .btn:disabled{opacity:.6;cursor:default}
+    .muted{opacity:.9;font-size:16px;margin-top:10px;line-height:1.45}
+    .err{color:#ffb4b4}
+    .hidden{display:none}
+    .manual-box{margin-top:14px;padding:14px;border-radius:16px;background:#0f1a2e}
+    .input{width:100%;box-sizing:border-box;padding:16px;border-radius:16px;border:2px solid #25314c;background:#0b1320;color:#fff;font-size:26px;font-weight:700;letter-spacing:1px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .row .btn{flex:1}
+
+    .flash-result{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .15s ease;
+    }
+    .flash-result.show{
+      opacity:1;
+    }
+    .flash-result.ok{
+      background:rgba(20,160,80,.92);
+    }
+    .flash-result.error{
+      background:rgba(200,40,40,.92);
+    }
+    .flash-icon{
+      font-size:220px;
+      line-height:1;
+      color:#fff;
+      transform:scale(.6);
+      transition:transform .15s ease;
+      text-shadow:0 10px 30px rgba(0,0,0,.25);
+    }
+    .flash-result.show .flash-icon{
+      transform:scale(1);
+    }
+
+    @media (max-width:480px){
+      h1{font-size:24px}
+      p,.status{font-size:17px}
+      .btn{font-size:24px}
+      .btn.manual{font-size:20px}
+      .input{font-size:22px}
+      .flash-icon{font-size:170px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>📷 СКАНИРОВАНИЕ ТАЛОНА</h1>
+      <p>Нажмите большую кнопку <b>«СКАНИРОВАТЬ»</b>. Если камера или QR не сработали, ниже можно ввести код вручную.</p>
+
+      <button id="startScan" class="btn">СКАНИРОВАТЬ</button>
+
+      <div id="scannerArea" class="hidden">
+        <div class="video-wrap" style="margin-top:14px;">
+          <video id="video" playsinline muted></video>
+          <div class="frame"><div class="box"></div></div>
+        </div>
+      </div>
+
+      <div id="status" class="status wait">
+        <div id="statusIcon" class="statusIcon">⏳</div>
+        <div id="statusText">Ожидание запуска сканера…</div>
+      </div>
+
+      <div id="summary" class="muted" style="margin-top:10px;">Сканировано: <b id="count">0</b></div>
+      <div id="list" class="status hidden" style="margin-top:10px;max-height:220px;overflow:auto;"></div>
+
+      <button id="showManual" class="btn manual">ВВЕСТИ КОД ВРУЧНУЮ</button>
+      <div id="manualBox" class="manual-box hidden">
+        <input id="manualCode" class="input" type="text" inputmode="numeric" placeholder="Введите код">
+        <div class="row">
+          <button id="sendManual" class="btn manual">ОТПРАВИТЬ КОД</button>
+        </div>
+      </div>
+
+      <button id="finish" class="btn secondary">ЗАВЕРШИТЬ</button>
+      <button id="retry" class="btn hidden">ПОВТОРИТЬ</button>
+      <div class="muted">Камера продолжит работать после успешного талона, поэтому можно сканировать подряд несколько QR-кодов.</div>
+    </div>
+  </div>
+
+  <div id="flashResult" class="flash-result">
+    <div id="flashIcon" class="flash-icon"></div>
+  </div>
+
+  <audio id="scanSound" preload="auto" playsinline>
+    <source src="/static/scan.wav" type="audio/wav">
+  </audio>
+  
+  <audio id="errorSound" preload="auto" playsinline>
+    <source src="/static/error.wav" type="audio/wav">
+  </audio>
+
+<script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
+<script>
+const TOKEN = {{ token|tojson }};
+const INIT_DATA = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) ? Telegram.WebApp.initData : "";
+const statusEl = document.getElementById('status');
+const statusIconEl = document.getElementById('statusIcon');
+const statusTextEl = document.getElementById('statusText');
+const video = document.getElementById('video');
+const retryBtn = document.getElementById('retry');
+const finishBtn = document.getElementById('finish');
+const listEl = document.getElementById('list');
+const countEl = document.getElementById('count');
+const startBtn = document.getElementById('startScan');
+const scannerArea = document.getElementById('scannerArea');
+const showManualBtn = document.getElementById('showManual');
+const manualBox = document.getElementById('manualBox');
+const manualCode = document.getElementById('manualCode');
+const sendManualBtn = document.getElementById('sendManual');
+const scanSound = document.getElementById('scanSound');
+const errorSound = document.getElementById('errorSound');
+const boxEl = document.querySelector('.box');
+const flashResultEl = document.getElementById('flashResult');
+const flashIconEl = document.getElementById('flashIcon');
+
+let soundUnlocked = false;
+
+async function unlockSound(){
+  if(soundUnlocked) return;
+
+  try{
+    if(scanSound){
+      scanSound.muted = true;
+      scanSound.volume = 0;
+      await scanSound.play();
+      scanSound.pause();
+      scanSound.currentTime = 0;
+      scanSound.muted = false;
+      scanSound.volume = 1.0;
+    }
+
+    if(errorSound){
+      errorSound.muted = true;
+      errorSound.volume = 0;
+      await errorSound.play();
+      errorSound.pause();
+      errorSound.currentTime = 0;
+      errorSound.muted = false;
+      errorSound.volume = 1.0;
+    }
+
+    soundUnlocked = true;
+  }catch(e){
+    console.log("unlock failed", e);
+  }
+}
+
+function setStatus(text, mode='wait'){
+  if(statusTextEl){
+    statusTextEl.textContent = text;
+  }else{
+    statusEl.textContent = text;
+  }
+
+  if(statusIconEl){
+    if(mode === 'ok'){
+      statusIconEl.textContent = '✅';
+    } else if(mode === 'error'){
+      statusIconEl.textContent = '❌';
+    } else if(mode === 'scan'){
+      statusIconEl.textContent = '📷';
+    } else if(mode === 'check'){
+      statusIconEl.textContent = '⏳';
+    } else {
+      statusIconEl.textContent = '⏳';
+    }
+  }
+
+  statusEl.classList.remove('ok', 'error', 'wait');
+
+  if(mode === 'ok'){
+    statusEl.classList.add('ok');
+  } else if(mode === 'error'){
+    statusEl.classList.add('error');
+  } else {
+    statusEl.classList.add('wait');
+  }
+}
+
+function flashResult(type){
+  if(!flashResultEl || !flashIconEl) return;
+
+  flashResultEl.classList.remove('ok', 'error');
+
+  if(type === 'ok'){
+    flashIconEl.textContent = '✓';
+    flashResultEl.classList.add('ok');
+  }else{
+    flashIconEl.textContent = '✕';
+    flashResultEl.classList.add('error');
+  }
+
+  flashResultEl.classList.add('show');
+
+  setTimeout(()=>{
+    flashResultEl.classList.remove('show');
+  }, 1000);
+}
+
+function flashBox(kind){
+  if(!boxEl) return;
+
+  if(kind === 'ok'){
+    boxEl.style.borderColor = '#24a148';
+    boxEl.style.boxShadow = '0 0 0 9999px rgba(36,161,72,.10)';
+    boxEl.style.transform = 'scale(1.02)';
+    setTimeout(() => {
+      boxEl.style.borderColor = 'rgba(255,255,255,.9)';
+      boxEl.style.boxShadow = '0 0 0 9999px rgba(0,0,0,.25)';
+      boxEl.style.transform = 'scale(1)';
+    }, 280);
+    return;
+  }
+
+  boxEl.style.borderColor = '#ff5a5a';
+  boxEl.style.boxShadow = '0 0 0 9999px rgba(255,90,90,.10)';
+  boxEl.style.transform = 'scale(1.02)';
+  setTimeout(() => {
+    boxEl.style.borderColor = 'rgba(255,255,255,.9)';
+    boxEl.style.boxShadow = '0 0 0 9999px rgba(0,0,0,.25)';
+    boxEl.style.transform = 'scale(1)';
+  }, 380);
+}
+
+function playSuccessFeedback(){
+  try{
+    if(scanSound){
+      scanSound.pause();
+      scanSound.currentTime = 0;
+      scanSound.muted = false;
+      scanSound.volume = 1.0;
+      const p = scanSound.play();
+      if(p && typeof p.catch === "function"){
+        p.catch(err => console.log("sound error", err));
+      }
+    }
+  }catch(e){}
+
+  flashBox('ok');
+  flashResult('ok');
+
+  setTimeout(()=>{
+    if(window.Telegram && Telegram.WebApp){
+      Telegram.WebApp.close()
+    }
+  },1200)
+
+}
+
+function playErrorFeedback(){
+  try{
+    if(errorSound){
+      errorSound.pause();
+      errorSound.currentTime = 0;
+      errorSound.muted = false;
+      errorSound.volume = 1.0;
+
+      const p = errorSound.play();
+      if(p && typeof p.catch === "function"){
+        p.catch(err => console.log("error sound error", err));
+      }
+    }
+  }catch(e){
+    console.log("error sound exception", e);
+  }
+
+  try{
+    navigator.vibrate && navigator.vibrate([80,60,80]);
+  }catch(e){}
+
+  try{
+    if(window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback){
+      Telegram.WebApp.HapticFeedback.notificationOccurred("error");
+    }
+  }catch(e){}
+
+  flashBox('err');
+  flashResult('error');
+  setTimeout(()=>{
+  if(window.Telegram && Telegram.WebApp){
+    Telegram.WebApp.close()
+  }
+},1200)
+}
+
+let stream = null;
+let detector = null;
+let scanning = false;
+let inFlight = false;
+let html5Scanner = null;
+let fallbackMode = false;
+const seen = new Map();
+let okCount = 0;
+
+function addToList(kind, text){
+  const ts = new Date().toLocaleTimeString();
+  listEl.classList.remove('hidden');
+  const div = document.createElement('div');
+  div.style.padding = '10px 12px';
+  div.style.borderRadius = '12px';
+  div.style.marginBottom = '8px';
+  div.style.background = kind === 'ok' ? 'rgba(36,161,72,.15)' : 'rgba(255,180,180,.12)';
+  div.innerHTML = `<b>${ts}</b> — ${text}`;
+  listEl.prepend(div);
+}
+
+function bumpCount(){
+  countEl.textContent = String(okCount);
+}
+
+function normalizeCode(raw){
+  let code = String(raw || '').trim();
+  try{
+    const url = new URL(code);
+    const qp = url.searchParams.get('code') || url.searchParams.get('talon') || url.searchParams.get('id');
+    if(qp) code = qp;
+  }catch(e){}
+  const m = code.match(/(\d{6,})/);
+  if(m) code = m[1];
+  return code;
+}
+
+function cleanupSeen(){
+  const now = Date.now();
+  for(const [k, ts] of seen.entries()){
+    if(now - ts > 15000) seen.delete(k);
+  }
+}
+
+async function submitCode(rawCode){
+  const code = normalizeCode(rawCode);
+  if(!code){
+    addToList('err', '❌ Не удалось распознать код.');
+    setStatus('Не удалось распознать код.', 'error');
+    playErrorFeedback();
+    return;
+  }
+
+  try{
+    const res = await fetch('/tg/api/scan', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({token: TOKEN, code, initData: INIT_DATA})
+    });
+
+    const data = await res.json().catch(()=>({ok:false,error:'bad_json'}));
+
+    if(res.ok && data.ok){
+      okCount += 1;
+      bumpCount();
+      addToList(
+        'ok',
+        `✅ Принят: <b>${code}</b>${data.liters ? ' — ' + data.liters + ' л' : ''}${data.agzs ? ' — ' + data.agzs : ''}`
+      );
+      setStatus('Талон принят.', 'ok');
+      playSuccessFeedback();
+      return;
+    }
+
+    if(data.error === 'already_used'){
+      addToList('err', `⚠️ Уже использован: <b>${code}</b>${data.agzs ? ' — ' + data.agzs : ''}`);
+      setStatus('Талон уже использован.', 'error');
+      playErrorFeedback();
+    } else if(data.error === 'talon_not_found'){
+      addToList('err', `❌ Не найден: <b>${code}</b>`);
+      setStatus('Талон не найден.', 'error');
+      playErrorFeedback();
+    } else if(data.error === 'expired'){
+      addToList('err', `❌ Срок талона истёк: <b>${code}</b>`);
+      setStatus('Срок действия талона истёк.', 'error');
+      playErrorFeedback();
+    } else if(data.error === 'token_expired' || data.error === 'not_logged_in'){
+      addToList('err', '❌ Сессия истекла. Вернитесь в бот и нажмите «СКАНИРОВАТЬ» ещё раз.');
+      scanning = false;
+      retryBtn.classList.remove('hidden');
+      setStatus('Сессия истекла.', 'error');
+      playErrorFeedback();
+      return;
+    } else if(data.error === 'invalid_telegram_context'){
+      addToList('err', '❌ Недействительная Telegram-сессия. Вернитесь в бот и откройте сканер заново.');
+      setStatus('Недействительная Telegram-сессия.', 'error');
+      playErrorFeedback();
+    } else if(data.error === 'missing_token_or_code'){
+      addToList('err', '❌ Пустой код.');
+      setStatus('Пустой код.', 'error');
+      playErrorFeedback();
+    } else {
+      addToList('err', `❌ Ошибка при обработке: <b>${code}</b>`);
+      setStatus('Ошибка при обработке талона.', 'error');
+      playErrorFeedback();
+    }
+  } catch(e){
+    console.error(e);
+    addToList('err', `❌ Ошибка сети: <b>${code}</b>`);
+    setStatus('Ошибка сети.', 'error');
+    playErrorFeedback();
+  }
+}
+
+async function handleDetected(raw){
+  const code = normalizeCode(raw);
+  if(!code || inFlight) return;
+
+  const now = Date.now();
+  const last = seen.get(code);
+  if(last && (now - last) <= 2500) return;
+
+  seen.set(code, now);
+  inFlight = true;
+  setStatus('Проверяю талон…', 'check');
+  await submitCode(code);
+  if(scanning) setStatus('Готово. Наведите на следующий QR…', 'scan');
+  inFlight = false;
+}
+
+async function scanLoop(){
+  if(!scanning || fallbackMode || !detector) return;
+  cleanupSeen();
+
+  if(!inFlight){
+    try{
+      const codes = await detector.detect(video);
+      if(codes && codes.length){
+        await handleDetected((codes[0].rawValue || '').trim());
+      }
+    } catch(e){
+      console.error(e);
+    }
+  }
+
+  requestAnimationFrame(scanLoop);
+}
+
+async function startBarcodeDetectorMode(){
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' } },
+    audio:false
+  });
+
+  video.srcObject = stream;
+  await video.play();
+
+  detector = new BarcodeDetector({formats:['qr_code']});
+  fallbackMode = false;
+  scanning = true;
+  setStatus('Готово. Наведите на QR…', 'scan');
+  scanLoop();
+}
+
+async function startHtml5QrcodeFallback(){
+  fallbackMode = true;
+  setStatus('Запущен резервный сканер QR…', 'scan');
+
+  try{
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+  }catch(e){}
+
+  let reader = document.getElementById('reader');
+  if(!reader){
+    reader = document.createElement('div');
+    reader.id = 'reader';
+    reader.style.marginTop = '14px';
+    scannerArea.appendChild(reader);
+  }
+
+  html5Scanner = new Html5Qrcode('reader');
+  await html5Scanner.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: { width: 240, height: 240 } },
+    async (decodedText) => { await handleDetected(decodedText); },
+    () => {}
+  );
+
+  scanning = true;
+  setStatus('Готово. Наведите на QR…', 'scan');
+}
+
+async function startCamera(){
+  retryBtn.classList.add('hidden');
+  scannerArea.classList.remove('hidden');
+  startBtn.disabled = true;
+
+  try{
+    setStatus('Открываю камеру…', 'check');
+
+    if('BarcodeDetector' in window){
+      try{
+        await startBarcodeDetectorMode();
+        return;
+      } catch(e){
+        console.error('BarcodeDetector failed, switching to fallback', e);
+      }
+    }
+
+    if(window.Html5Qrcode){
+      await startHtml5QrcodeFallback();
+      return;
+    }
+
+    throw new Error('scanner_not_supported');
+  } catch(e){
+    console.error(e);
+    setStatus('Не удалось открыть камеру. Разрешите доступ к камере или введите код вручную.', 'error');
+    retryBtn.classList.remove('hidden');
+    startBtn.disabled = false;
+  }
+}
+
+async function stopCamera(){
+  scanning = false;
+  detector = null;
+  inFlight = false;
+  fallbackMode = false;
+
+  try{
+    if(html5Scanner){
+      await html5Scanner.stop();
+      await html5Scanner.clear();
+      html5Scanner = null;
+    }
+  }catch(e){
+    console.error(e);
+  }
+
+  try{
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+  }catch(e){}
+
+  try{
+    video.srcObject = null;
+  }catch(e){}
+}
+
+startBtn.addEventListener('click', async ()=>{
+  await unlockSound();
+  await startCamera();
+});
+
+retryBtn.addEventListener('click', async ()=>{
+  await stopCamera();
+  await unlockSound();
+  await startCamera();
+});
+
+showManualBtn.addEventListener('click', ()=>{
+  manualBox.classList.toggle('hidden');
+  if(!manualBox.classList.contains('hidden')) manualCode.focus();
+});
+
+sendManualBtn.addEventListener('click', async ()=>{
+  const code = normalizeCode(manualCode.value);
+  if(!code){
+    setStatus('Введите код цифрами.', 'error');
+    manualCode.focus();
+    return;
+  }
+
+  manualCode.value = '';
+  setStatus('Проверяю талон…', 'check');
+  await submitCode(code);
+
+  if(scanning || fallbackMode) setStatus('Готово. Наведите на следующий QR…', 'scan');
+});
+
+manualCode.addEventListener('keydown', async (e)=>{
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    sendManualBtn.click();
+  }
+});
+
+finishBtn.addEventListener('click', async ()=>{
+  await stopCamera();
+  startBtn.disabled = false;
+  const msg = okCount ? `✅ Готово. Закрыто талонов: ${okCount}` : 'Готово.';
+  setStatus(msg, okCount ? 'ok' : 'wait');
+
+  try{
+    if(window.Telegram && Telegram.WebApp){
+      Telegram.WebApp.close();
+    }
+  }catch(e){}
+});
+
+bumpCount();
+document.addEventListener("DOMContentLoaded", async ()=>{
+  await unlockSound()
+  await startCamera()
+})
+</script>
+</body>
+</html>

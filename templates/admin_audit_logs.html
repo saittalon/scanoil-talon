@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+  .audit-page .card, .audit-page .card-body, .audit-page .table-responsive{background:linear-gradient(180deg, rgba(13,24,59,.96), rgba(10,18,45,.98));}
+  .audit-page .table thead th{background:rgba(95,124,255,.14)!important;color:#dbe6ff!important;}
+  .audit-page .table td, .audit-page .table th{color:#e9f1ff!important;border-color:rgba(173,196,255,.12)!important;}
+  .audit-page .form-control{background:rgba(7,15,39,.88)!important;color:#fff!important;border-color:rgba(173,196,255,.24)!important;}
+  .audit-page .alert{color:#eef4ff!important;}
+  .audit-page .text-muted{color:#b8c8ff!important;}
+</style>
+<div class="audit-page">
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h2 class="mb-1">Журнал действий</h2>
@@ -46,5 +55,6 @@
       </tbody>
     </table>
   </div>
+</div>
 </div>
 {% endblock %}

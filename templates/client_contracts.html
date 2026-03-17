@@ -155,7 +155,7 @@
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
           <div>
             <h6 class="mb-2">Заявки на изменение остатка</h6>
-            <div class="client-meta">История подтверждений по выбранному договору{% if all_balance_requests %} • всего заявок: {{ all_balance_requests|length }}{% endif %}</div>
+            <div class="client-meta">История по выбранному договору</div>
           </div>
         </div>
         {% if balance_requests %}
@@ -163,8 +163,8 @@
           {% for r in balance_requests %}
             <div class="file-row d-flex justify-content-between align-items-center gap-3">
               <div>
-                <div class="fw-semibold">{{ r.old_liters or 0 }} л → {{ r.requested_liters or 0 }} л</div>
-                <div class="client-meta mt-1">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }} • {{ r.requested_by.username if r.requested_by else '—' }} • {{ r.status }}</div>
+                <div class="fw-semibold">{% set delta = r.delta_liters if r.delta_liters is not none else ((r.requested_liters or 0) - (r.old_liters or 0)) %}{% if delta >= 0 %}+{% endif %}{{ "%.2f"|format(delta) }} л</div>
+                <div class="client-meta mt-1">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }} • {{ r.requested_by.username if r.requested_by else '—' }} • было {{ '%.2f'|format(r.old_liters or 0) }} л • станет {{ '%.2f'|format(r.requested_liters or 0) }} л • {% if r.status == 'pending' %}ожидает решения{% elif r.status == 'approved' %}подтверждено{% else %}отклонено{% endif %}</div>
                 {% if r.comment %}<div class="client-meta mt-1">{{ r.comment }}</div>{% endif %}
               </div>
               <div class="d-flex gap-2 flex-wrap">
@@ -187,48 +187,11 @@
         {% endif %}
       </div>
 
-      <div class="info-card mt-4">
-        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-          <div>
-            <h6 class="mb-2">Все заявки клиента</h6>
-            <div class="client-meta">Показываются последние заявки, даже если они созданы по другому договору</div>
-          </div>
-        </div>
-        {% if all_balance_requests %}
-          <div class="side-list">
-          {% for r in all_balance_requests %}
-            <div class="file-row d-flex justify-content-between align-items-center gap-3">
-              <div>
-                <div class="fw-semibold">{{ r.old_liters or 0 }} л → {{ r.requested_liters or 0 }} л</div>
-                <div class="client-meta mt-1">Договор: {{ r.contract.number if r.contract else '—' }} • {{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</div>
-                <div class="client-meta mt-1">{{ r.requested_by.username if r.requested_by else '—' }} • {{ r.status }}</div>
-                {% if r.comment %}<div class="client-meta mt-1">{{ r.comment }}</div>{% endif %}
-              </div>
-              <div class="d-flex gap-2 flex-wrap">
-                {% if r.status == 'pending' and current_role in ["director","zamdirector","deputy_director"] %}
-                  <form method="post" action="{{ url_for('clients.approve_balance_request', request_id=r.id) }}">
-                    <button class="btn btn-outline-success btn-sm" type="submit">Подтвердить</button>
-                  </form>
-                  <form method="post" action="{{ url_for('clients.reject_balance_request', request_id=r.id) }}">
-                    <button class="btn btn-outline-danger btn-sm" type="submit">Отклонить</button>
-                  </form>
-                {% elif r.approved_by %}
-                  <div class="client-meta">{{ r.approved_by.username }}</div>
-                {% endif %}
-              </div>
-            </div>
-          {% endfor %}
-          </div>
-        {% else %}
-          <div class="client-meta">Заявок пока нет.</div>
-        {% endif %}
-      </div>
-
       <div class="modal fade" id="balanceModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-centered">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title">Остатки для талонов</h5>
+              <h5 class="modal-title">Изменение остатка</h5>
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <form method="post" action="{{ url_for('clients.balance_set', client_id=client.id) }}">
@@ -266,7 +229,9 @@
                         {% endfor %}
                       </div>
                       <label class="form-label">Новый остаток, л</label>
-                      <input class="form-control" id="litersInput" name="liters_left" value="{{ balance.liters_left if balance else 0 }}">
+                      <input class="form-control" id="litersInput" name="liters_left" value="{{ balance.liters_left if balance else 0 }}" required>
+                      {% if current_role not in ["director","zamdirector","deputy_director"] %}<div class="client-meta mt-2">Исполнитель отправляет заявку, а директор/замдиректора должен подтвердить или отклонить её.</div>{% else %}<div class="client-meta mt-2">Директор/замдиректора меняет остаток сразу.</div>{% endif %}
+                      <div id="balanceChangePreview" class="alert alert-light border mt-3 mb-0"></div>
                       <label class="form-label mt-3">Комментарий</label>
                       <input class="form-control" name="comment" placeholder="Например: исправление номинала / пополнение остатка">
                     </div>
@@ -274,7 +239,7 @@
                 </div>
               </div>
               <div class="modal-footer">
-                <button class="btn btn-brand">{% if current_role in ["director","zamdirector","deputy_director"] %}Сохранить остаток{% else %}Отправить на подтверждение{% endif %}</button>
+                <button class="btn btn-brand">{% if current_role in ["director","zamdirector","deputy_director"] %}Сохранить остаток{% else %}Отправить заявку{% endif %}</button>
                 <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отменить</button>
               </div>
             </form>
@@ -282,11 +247,30 @@
         </div>
       </div>
       <script>
+        const currentBalanceValue = {{ (balance.liters_left if balance else 0) | tojson }};
+        function renderBalanceChangePreview(){
+          const inp = document.getElementById('litersInput');
+          const box = document.getElementById('balanceChangePreview');
+          if(!inp || !box) return;
+          const next = parseFloat((inp.value || '0').toString().replace(',', '.'));
+          const target = isNaN(next) ? 0 : next;
+          const delta = target - parseFloat(currentBalanceValue || 0);
+          const sign = delta >= 0 ? '+' : '';
+          box.innerHTML = `Сейчас: <b>${parseFloat(currentBalanceValue || 0).toFixed(2)} л</b>. Изменение: <b>${sign}${delta.toFixed(2)} л</b>. Станет: <b>${target.toFixed(2)} л</b>.`;
+        }
         function addLiters(x){
           const inp = document.getElementById('litersInput');
-          const cur = parseFloat((inp.value || "0").toString().replace(",", ".")) || 0;
+          const cur = parseFloat((inp.value || '0').toString().replace(',', '.')) || 0;
           inp.value = (cur + x).toString();
+          renderBalanceChangePreview();
         }
+        document.addEventListener('DOMContentLoaded', function(){
+          const inp = document.getElementById('litersInput');
+          if(inp){
+            inp.addEventListener('input', renderBalanceChangePreview);
+            renderBalanceChangePreview();
+          }
+        });
       </script>
     {% endif %}
   </div>

@@ -187,20 +187,20 @@
           </div>
 
           <div class="mt-3 d-flex flex-wrap gap-2">
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(5)">5 л</button>
             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(10)">10 л</button>
             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(20)">20 л</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(30)">30 л</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(40)">40 л</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setLiters(50)">50 л</button>
           </div>
 
           <div class="row g-3 mt-1">
             <div class="col-md-6">
               <label class="form-label">Дата начала</label>
-              <input type="date" class="form-control" name="valid_from" value="{{ date_from or '' }}">
+              <input type="date" class="form-control" name="valid_from" value="{{ date_from or '' }}" required>
             </div>
             <div class="col-md-6">
               <label class="form-label">Дата окончания</label>
-              <input type="date" class="form-control" name="valid_to" value="{{ date_to or '' }}">
+              <input type="date" class="form-control" name="valid_to" value="{{ date_to or '' }}" required>
             </div>
           </div>
 

@@ -76,34 +76,53 @@ function vibrate(kind){
   } catch(e) {}
 }
 
-async function unlockAudio(){
+async function unlockAudio() {
   if (audioUnlocked) return;
   audioUnlocked = true;
+
   try {
-    okAudio.muted = true;
-    await okAudio.play();
+    okAudio.load();
+    okAudio.volume = 1;
+    okAudio.muted = false;
+    const p1 = okAudio.play();
+    if (p1) await p1.catch(() => {});
     okAudio.pause();
     okAudio.currentTime = 0;
-    okAudio.muted = false;
-  } catch(e) {}
+  } catch (e) {}
+
   try {
-    errAudio.muted = true;
-    await errAudio.play();
+    errAudio.load();
+    errAudio.volume = 1;
+    errAudio.muted = false;
+    const p2 = errAudio.play();
+    if (p2) await p2.catch(() => {});
     errAudio.pause();
     errAudio.currentTime = 0;
-    errAudio.muted = false;
-  } catch(e) {}
+  } catch (e) {}
 }
 
-function playAudio(el){
+function playAudio(el) {
   try {
+    el.pause();
     el.currentTime = 0;
+    el.volume = 1;
+    el.muted = false;
     const p = el.play();
-    if (p && typeof p.catch === 'function') p.catch(() => {});
-  } catch(e) {}
+    if (p) {
+      p.then(() => {}).catch(() => {});
+    }
+  } catch (e) {}
 }
-function playOk(){ vibrate('ok'); playAudio(okAudio); }
-function playErr(){ vibrate('error'); playAudio(errAudio); }
+
+function playOk() {
+  vibrate('ok');
+  playAudio(okAudio);
+}
+
+function playErr() {
+  vibrate('error');
+  playAudio(errAudio);
+}
 
 function showResult(kind, text, sub=''){
   active = false;
@@ -208,9 +227,18 @@ async function start(){
   }
 }
 
-document.addEventListener('click', unlockAudio, { once:true });
-document.addEventListener('touchstart', unlockAudio, { once:true });
-window.addEventListener('load', start);
+document.addEventListener('click', async () => {
+  await unlockAudio();
+}, { once: true });
+
+document.addEventListener('touchstart', async () => {
+  await unlockAudio();
+}, { once: true });
+
+window.addEventListener('load', async () => {
+  await unlockAudio();
+  start();
+});
 window.addEventListener('beforeunload', () => {
   active = false;
   try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch(e) {}

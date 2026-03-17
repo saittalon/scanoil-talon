@@ -2,549 +2,117 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Сканер талонов</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    html,body{height:100%}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#000;color:#fff;overflow:hidden}
-    .wrap{height:100%;max-width:none;margin:0;padding:0}
-    .card{height:100%;background:#000;border-radius:0;padding:0;box-shadow:none;position:relative}
-    h1,p,.btn,.manual-box,.muted,#summary,#list,#finish,#startScan,#showManual{display:none !important}
-    .video-wrap{position:fixed;inset:0;overflow:hidden;background:#000;min-height:100vh}
-    video{width:100vw;height:100vh;display:block;background:#000;object-fit:cover}
-    .frame{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-    .box{
-      width:72%;
-      aspect-ratio:1/1;
-      border:4px solid rgba(255,255,255,.9);
-      border-radius:18px;
-      box-shadow:0 0 0 9999px rgba(0,0,0,.25);
-      transition:border-color .25s ease, box-shadow .25s ease, transform .15s ease;
-    }
-    .status{
-      margin-top:14px;
-      padding:14px 16px;
-      border-radius:16px;
-      background:#0f1a2e;
-      font-size:18px;
-      line-height:1.4;
-      border:2px solid rgba(255,255,255,.08);
-      transition:background .2s ease,border-color .2s ease,color .2s ease;
-    }
-    .status.ok{
-      border-color:rgba(36,161,72,.55);
-      background:rgba(36,161,72,.12);
-    }
-    .status.error{
-      border-color:rgba(255,90,90,.55);
-      background:rgba(255,90,90,.12);
-    }
-    .status.wait{
-      border-color:rgba(255,255,255,.08);
-      background:#0f1a2e;
-    }
-    .statusIcon{
-      font-size:42px;
-      line-height:1;
-      margin-bottom:8px;
-    }
-    .btn{width:100%;margin-top:14px;padding:18px 16px;border-radius:18px;border:0;background:#24a148;color:#fff;font-weight:800;font-size:28px;line-height:1.15;cursor:pointer}
-    .btn.secondary{background:#3b82f6;font-size:20px}
-    .btn.manual{background:#f59e0b;color:#111827;font-size:22px}
-    .btn:disabled{opacity:.6;cursor:default}
-    .muted{opacity:.9;font-size:16px;margin-top:10px;line-height:1.45}
-    .err{color:#ffb4b4}
-    .hidden{display:none}
-    .manual-box{margin-top:14px;padding:14px;border-radius:16px;background:#0f1a2e}
-    .input{width:100%;box-sizing:border-box;padding:16px;border-radius:16px;border:2px solid #25314c;background:#0b1320;color:#fff;font-size:26px;font-weight:700;letter-spacing:1px}
-    .row{display:flex;gap:10px;flex-wrap:wrap}
-    .row .btn{flex:1}
-
-    .flash-result{
-      position:fixed;
-      inset:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      z-index:9999;
-      opacity:0;
-      pointer-events:none;
-      transition:opacity .15s ease;
-    }
-    .flash-result.show{
-      opacity:1;
-    }
-    .flash-result.ok{
-      background:rgba(20,160,80,.92);
-    }
-    .flash-result.error{
-      background:rgba(200,40,40,.92);
-    }
-    .flash-icon{
-      font-size:220px;
-      line-height:1;
-      color:#fff;
-      transform:scale(.6);
-      transition:transform .15s ease;
-      text-shadow:0 10px 30px rgba(0,0,0,.25);
-    }
-    .flash-result.show .flash-icon{
-      transform:scale(1);
-    }
-
-    @media (max-width:480px){
-      h1{font-size:24px}
-      p,.status{font-size:17px}
-      .btn{font-size:24px}
-      .btn.manual{font-size:20px}
-      .input{font-size:22px}
-      .flash-icon{font-size:170px}
-    }
+    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
+    #reader{position:fixed;inset:0;z-index:1}
+    .overlay{position:fixed;inset:0;pointer-events:none;z-index:2;display:flex;align-items:center;justify-content:center}
+    .frame{width:min(78vw,78vh);height:min(78vw,78vh);border:4px solid rgba(255,255,255,.95);border-radius:20px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+    .status{position:fixed;left:12px;right:12px;top:12px;z-index:3;background:rgba(9,20,50,.92);border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:18px 20px;font-size:20px;line-height:1.35;box-shadow:0 12px 30px rgba(0,0,0,.25)}
+    .flash{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;font-size:190px;font-weight:800;opacity:0;pointer-events:none;transition:opacity .15s ease}
+    .flash.show{opacity:1}.flash.ok{background:rgba(24,160,84,.94)}.flash.err{background:rgba(210,44,44,.94)}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
+  <div id="reader"></div>
+  <div class="overlay"><div class="frame"></div></div>
+  <div id="status" class="status">⏳ Ожидание запуска сканера…</div>
+  <div id="flash" class="flash"></div>
+  <audio id="okAudio" preload="auto" src="/static/scan.wav"></audio>
+  <audio id="errAudio" preload="auto" src="/static/error.wav"></audio>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
+  <script>
+    const TOKEN = {{ token|tojson }};
+    const tg = window.Telegram && Telegram.WebApp ? Telegram.WebApp : null;
+    const initData = tg && tg.initData ? tg.initData : '';
+    const statusEl = document.getElementById('status');
+    const flashEl = document.getElementById('flash');
+    const okAudio = document.getElementById('okAudio');
+    const errAudio = document.getElementById('errAudio');
+    let scanner = null;
+    let busy = false;
+    let lastCode = '';
+    let lastAt = 0;
 
-      <div id="scannerArea" class="hidden">
-        <div class="video-wrap" style="margin-top:14px;">
-          <video id="video" playsinline muted></video>
-          <div class="frame"><div class="box"></div></div>
-        </div>
-      </div>
-
-      <div id="status" class="status wait">
-        <div id="statusIcon" class="statusIcon">⏳</div>
-        <div id="statusText">Ожидание запуска сканера…</div>
-      </div>
-
-<button id="retry" class="btn hidden">ПОВТОРИТЬ</button>    </div>
-  </div>
-
-  <div id="flashResult" class="flash-result">
-    <div id="flashIcon" class="flash-icon"></div>
-  </div>
-
-<script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
-<script>
-const TOKEN = {{ token|tojson }};
-const INIT_DATA = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) ? Telegram.WebApp.initData : "";
-const statusEl = document.getElementById('status');
-const statusIconEl = document.getElementById('statusIcon');
-const statusTextEl = document.getElementById('statusText');
-const video = document.getElementById('video');
-const retryBtn = document.getElementById('retry');
-const startBtn = document.getElementById('startScan');
-const scannerArea = document.getElementById('scannerArea');
-const boxEl = document.querySelector('.box');
-const flashResultEl = document.getElementById('flashResult');
-const flashIconEl = document.getElementById('flashIcon');
-
-let soundUnlocked = false;
-let audioCtx = null;
-
-function ensureAudioContext(){
-  try{
-    if(!audioCtx){
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if(audioCtx && audioCtx.state === 'suspended'){
-      audioCtx.resume();
-    }
-  }catch(e){}
-}
-
-async function unlockSound(){
-  if(soundUnlocked) return;
-  ensureAudioContext();
-  soundUnlocked = true;
-}
-
-function beep(freq, duration){
-  try{
-    ensureAudioContext();
-    if(!audioCtx) return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    gain.gain.value = 0.001;
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    const now = audioCtx.currentTime;
-    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + duration / 1000);
-    osc.start(now);
-    osc.stop(now + duration / 1000 + 0.02);
-  }catch(e){}
-}
-
-function setStatus(text, mode='wait'){
-  if(statusTextEl){
-    statusTextEl.textContent = text;
-  }else{
-    statusEl.textContent = text;
-  }
-
-  if(statusIconEl){
-    if(mode === 'ok'){
-      statusIconEl.textContent = '✅';
-    } else if(mode === 'error'){
-      statusIconEl.textContent = '❌';
-    } else if(mode === 'scan'){
-      statusIconEl.textContent = '📷';
-    } else if(mode === 'check'){
-      statusIconEl.textContent = '⏳';
-    } else {
-      statusIconEl.textContent = '⏳';
-    }
-  }
-
-  statusEl.classList.remove('ok', 'error', 'wait');
-
-  if(mode === 'ok'){
-    statusEl.classList.add('ok');
-  } else if(mode === 'error'){
-    statusEl.classList.add('error');
-  } else {
-    statusEl.classList.add('wait');
-  }
-}
-
-function flashResult(type){
-  if(!flashResultEl || !flashIconEl) return;
-
-  flashResultEl.classList.remove('ok', 'error');
-
-  if(type === 'ok'){
-    flashIconEl.textContent = '✓';
-    flashResultEl.classList.add('ok');
-  }else{
-    flashIconEl.textContent = '✕';
-    flashResultEl.classList.add('error');
-  }
-
-  flashResultEl.classList.add('show');
-
-  setTimeout(()=>{
-    flashResultEl.classList.remove('show');
-  }, 1000);
-}
-
-function flashBox(kind){
-  if(!boxEl) return;
-
-  if(kind === 'ok'){
-    boxEl.style.borderColor = '#24a148';
-    boxEl.style.boxShadow = '0 0 0 9999px rgba(36,161,72,.10)';
-    boxEl.style.transform = 'scale(1.02)';
-    setTimeout(() => {
-      boxEl.style.borderColor = 'rgba(255,255,255,.9)';
-      boxEl.style.boxShadow = '0 0 0 9999px rgba(0,0,0,.25)';
-      boxEl.style.transform = 'scale(1)';
-    }, 280);
-    return;
-  }
-
-  boxEl.style.borderColor = '#ff5a5a';
-  boxEl.style.boxShadow = '0 0 0 9999px rgba(255,90,90,.10)';
-  boxEl.style.transform = 'scale(1.02)';
-  setTimeout(() => {
-    boxEl.style.borderColor = 'rgba(255,255,255,.9)';
-    boxEl.style.boxShadow = '0 0 0 9999px rgba(0,0,0,.25)';
-    boxEl.style.transform = 'scale(1)';
-  }, 380);
-}
-
-function playSuccessFeedback(){
-  beep(1200, 140);
-  setTimeout(()=>beep(1600, 180), 120);
-  flashBox('ok');
-  flashResult('ok');
-}
-
-function playErrorFeedback(){
-  beep(260, 220);
-  setTimeout(()=>beep(180, 260), 140);
-  try{
-    navigator.vibrate && navigator.vibrate([80,60,80]);
-  }catch(e){}
-  try{
-    if(window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback){
-      Telegram.WebApp.HapticFeedback.notificationOccurred("error");
-    }
-  }catch(e){}
-  flashBox('err');
-  flashResult('error');
-}
-
-let stream = null;
-let detector = null;
-let scanning = false;
-let inFlight = false;
-let html5Scanner = null;
-let fallbackMode = false;
-const seen = new Map();
-let okCount = 0;
-
-function addToList(kind, text){ console.log(kind, text); }
-
-function bumpCount(){}
-
-function normalizeCode(raw){
-  let code = String(raw || '').trim();
-  try{
-    const url = new URL(code);
-    const qp = url.searchParams.get('code') || url.searchParams.get('talon') || url.searchParams.get('id');
-    if(qp) code = qp;
-  }catch(e){}
-  const m = code.match(/(\d{6,})/);
-  if(m) code = m[1];
-  return code;
-}
-
-function cleanupSeen(){
-  const now = Date.now();
-  for(const [k, ts] of seen.entries()){
-    if(now - ts > 15000) seen.delete(k);
-  }
-}
-
-async function submitCode(rawCode){
-  const code = normalizeCode(rawCode);
-  if(!code){
-    addToList('err', '❌ Не удалось распознать код.');
-    setStatus('Не удалось распознать код.', 'error');
-    playErrorFeedback();
-    return;
-  }
-
-  try{
-    const res = await fetch('/tg/api/scan', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({token: TOKEN, code, initData: INIT_DATA})
-    });
-
-    const data = await res.json().catch(()=>({ok:false,error:'bad_json'}));
-
-    if(res.ok && data.ok){
-      okCount += 1;
-      bumpCount();
-      setStatus('Талон принят.', 'ok');
-      playSuccessFeedback();
-      setTimeout(()=>{
-        if(window.Telegram && Telegram.WebApp){
-          Telegram.WebApp.close();
-        }
-      }, 1200);
-      return;
-    }
-
-    if(data.error === 'already_used'){
-      setStatus('Талон уже использован.', 'error');
-      playErrorFeedback();
-      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
-    } else if(data.error === 'talon_not_found'){
-      setStatus('Талон не найден.', 'error');
-      playErrorFeedback();
-      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
-    } else if(data.error === 'expired'){
-      setStatus('Срок действия талона истёк.', 'error');
-      playErrorFeedback();
-      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
-    } else if(data.error === 'token_expired' || data.error === 'not_logged_in'){
-      scanning = false;
-      retryBtn.classList.remove('hidden');
-      setStatus('Сессия истекла.', 'error');
-      playErrorFeedback();
-      return;
-    } else if(data.error === 'invalid_telegram_context'){
-      setStatus('Недействительная Telegram-сессия.', 'error');
-      playErrorFeedback();
-      return;
-    } else if(data.error === 'missing_token_or_code'){
-      setStatus('Пустой код.', 'error');
-      playErrorFeedback();
-      return;
-    } else {
-      setStatus('Ошибка при обработке талона.', 'error');
-      playErrorFeedback();
-      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
-    }
-  } catch(e){
-    console.error(e);
-    setStatus('Ошибка сети.', 'error');
-    playErrorFeedback();
-  }
-}
-
-async function handleDetected(raw){
-  const code = normalizeCode(raw);
-  if(!code || inFlight) return;
-
-  const now = Date.now();
-  const last = seen.get(code);
-  if(last && (now - last) <= 2500) return;
-
-  seen.set(code, now);
-  inFlight = true;
-  setStatus('Проверяю талон…', 'check');
-  await submitCode(code);
-  if(scanning) setStatus('Готово. Наведите на следующий QR…', 'scan');
-  inFlight = false;
-}
-
-async function scanLoop(){
-  if(!scanning || fallbackMode || !detector) return;
-  cleanupSeen();
-
-  if(!inFlight){
-    try{
-      const codes = await detector.detect(video);
-      if(codes && codes.length){
-        await handleDetected((codes[0].rawValue || '').trim());
-      }
-    } catch(e){
-      console.error(e);
-    }
-  }
-
-  requestAnimationFrame(scanLoop);
-}
-
-async function startBarcodeDetectorMode(){
-  stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: 'environment' } },
-    audio:false
-  });
-
-  video.srcObject = stream;
-  await video.play();
-
-  detector = new BarcodeDetector({formats:['qr_code']});
-  fallbackMode = false;
-  scanning = true;
-  setStatus('Готово. Наведите на QR…', 'scan');
-  scanLoop();
-}
-
-async function startHtml5QrcodeFallback(){
-  fallbackMode = true;
-  setStatus('Запущен резервный сканер QR…', 'scan');
-
-  try{
-    if(stream){
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-    video.srcObject = null;
-  }catch(e){}
-
-  let reader = document.getElementById('reader');
-  if(!reader){
-    reader = document.createElement('div');
-    reader.id = 'reader';
-    reader.style.marginTop = '14px';
-    scannerArea.appendChild(reader);
-  }
-
-  html5Scanner = new Html5Qrcode('reader');
-  await html5Scanner.start(
-    { facingMode: 'environment' },
-    { fps: 10, qrbox: { width: 240, height: 240 } },
-    async (decodedText) => { await handleDetected(decodedText); },
-    () => {}
-  );
-
-  scanning = true;
-  setStatus('Готово. Наведите на QR…', 'scan');
-}
-
-async function startCamera(){
-  retryBtn.classList.add('hidden');
-  scannerArea.classList.remove('hidden');
-  startBtn.disabled = true;
-
-  try{
-    setStatus('Открываю камеру…', 'check');
-
-    if('BarcodeDetector' in window){
+    function setStatus(t){ statusEl.textContent = t; }
+    function beep(type){
+      const a = type === 'ok' ? okAudio : errAudio;
+      try{ a.pause(); a.currentTime = 0; a.play().catch(()=>{}); }catch(e){}
       try{
-        await startBarcodeDetectorMode();
-        return;
-      } catch(e){
-        console.error('BarcodeDetector failed, switching to fallback', e);
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator(); const g = ctx.createGain();
+        o.type='sine'; o.frequency.value = type === 'ok' ? 1100 : 240;
+        g.gain.value = 0.07; o.connect(g); g.connect(ctx.destination); o.start();
+        setTimeout(()=>{o.stop(); ctx.close();}, type === 'ok' ? 180 : 350);
+      }catch(e){}
+      try{ if(tg && tg.HapticFeedback){ tg.HapticFeedback.notificationOccurred(type === 'ok' ? 'success' : 'error'); } }catch(e){}
+    }
+    function flash(type){
+      flashEl.className = 'flash show ' + (type === 'ok' ? 'ok' : 'err');
+      flashEl.textContent = type === 'ok' ? '✓' : '✕';
+    }
+    function closeLater(){ setTimeout(()=>{ try{ if(tg){ tg.close(); } else { window.close(); } }catch(e){} }, 1300); }
+
+    async function submitCode(raw){
+      if(busy) return;
+      const code = String(raw || '').trim().match(/(\d{6,})/);
+      const normalized = code ? code[1] : String(raw || '').trim();
+      const now = Date.now();
+      if(!normalized) return;
+      if(normalized === lastCode && now - lastAt < 2500) return;
+      lastCode = normalized; lastAt = now; busy = true;
+      setStatus('⏳ Проверяю талон…');
+      try{
+        const res = await fetch('/tg/api/scan', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ token: TOKEN, code: normalized, initData })
+        });
+        const data = await res.json().catch(()=>({ok:false,error:'bad_json'}));
+        if(res.ok && data.ok){
+          setStatus(`✅ Талон принят: №${data.serial || '—'} / ${data.liters || 0} л`);
+          beep('ok'); flash('ok');
+          try{ await scanner.stop(); }catch(e){}
+          closeLater();
+          return;
+        }
+        let msg = '❌ Ошибка талона';
+        if(data.error === 'already_used') msg = '❌ Талон уже использован';
+        else if(data.error === 'expired') msg = '❌ Срок действия истёк';
+        else if(data.error === 'talon_not_found') msg = '❌ Талон не найден';
+        else if(data.error === 'invalid_telegram_context' || data.error === 'token_expired' || data.error === 'not_logged_in') msg = '❌ Сессия истекла. Откройте сканер заново';
+        setStatus(msg);
+        beep('err'); flash('err');
+        try{ await scanner.stop(); }catch(e){}
+        closeLater();
+      }catch(e){
+        setStatus('❌ Ошибка сети');
+        beep('err'); flash('err');
+        try{ await scanner.stop(); }catch(e2){}
+        closeLater();
+      }
+      finally{ busy = false; }
+    }
+
+    async function start(){
+      try{
+        if(tg){ tg.ready(); tg.expand(); }
+        document.body.addEventListener('click', ()=>{ try{ okAudio.play().then(()=>{okAudio.pause();okAudio.currentTime=0;}); errAudio.play().then(()=>{errAudio.pause();errAudio.currentTime=0;}); }catch(e){} }, {once:true});
+        scanner = new Html5Qrcode('reader');
+        setStatus('📷 Наведите камеру на QR талона');
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 12, qrbox: { width: 280, height: 280 }, aspectRatio: 1.0 },
+          decodedText => submitCode(decodedText),
+          () => {}
+        );
+      }catch(e){
+        setStatus('❌ Не удалось открыть камеру');
       }
     }
-
-    if(window.Html5Qrcode){
-      await startHtml5QrcodeFallback();
-      return;
-    }
-
-    throw new Error('scanner_not_supported');
-  } catch(e){
-    console.error(e);
-    setStatus('Не удалось открыть камеру. Разрешите доступ к камере или введите код вручную.', 'error');
-    retryBtn.classList.remove('hidden');
-    startBtn.disabled = false;
-  }
-}
-
-async function stopCamera(){
-  scanning = false;
-  detector = null;
-  inFlight = false;
-  fallbackMode = false;
-
-  try{
-    if(html5Scanner){
-      await html5Scanner.stop();
-      await html5Scanner.clear();
-      html5Scanner = null;
-    }
-  }catch(e){
-    console.error(e);
-  }
-
-  try{
-    if(stream){
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-  }catch(e){}
-
-  try{
-    video.srcObject = null;
-  }catch(e){}
-}
-
-startBtn.addEventListener('click', async ()=>{
-  await unlockSound();
-  await startCamera();
-});
-
-retryBtn.addEventListener('click', async ()=>{
-  await stopCamera();
-  await unlockSound();
-  await startCamera();
-});
-
-
-bumpCount();
-document.addEventListener("DOMContentLoaded", async ()=>{
-  try{
-    if(window.Telegram && Telegram.WebApp){
-      Telegram.WebApp.ready();
-      Telegram.WebApp.expand();
-      Telegram.WebApp.disableVerticalSwipes && Telegram.WebApp.disableVerticalSwipes();
-    }
-  }catch(e){}
-  await unlockSound();
-  await startCamera();
-})
-</script>
+    start();
+  </script>
 </body>
 </html>

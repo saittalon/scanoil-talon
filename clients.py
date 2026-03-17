@@ -28,8 +28,12 @@ def is_admin():
     return has_role("director", "zamdirector", "deputy_director")
 
 
-def can_edit_balances():
+def can_manage_clients():
     return has_role("director", "zamdirector", "deputy_director", "executor", "operator")
+
+
+def can_edit_balances():
+    return has_role("director", "zamdirector", "deputy_director")
 
 
 def can_edit_contracts():
@@ -163,8 +167,8 @@ def list_clients():
 @clients_bp.get("/clients/new", endpoint="new_client")
 @login_required
 def client_new_get():
-    if not is_admin():
-        flash("Только админ может добавлять клиентов", "warning")
+    if not can_manage_clients():
+        flash("Недостаточно прав для добавления клиента", "warning")
         return redirect(url_for("clients.list_clients"))
     return render_template("client_new.html")
 
@@ -172,8 +176,8 @@ def client_new_get():
 @clients_bp.post("/clients/new", endpoint="new_client_post")
 @login_required
 def client_new_post():
-    if not is_admin():
-        flash("Только админ может добавлять клиентов", "warning")
+    if not can_manage_clients():
+        flash("Недостаточно прав для добавления клиента", "warning")
         return redirect(url_for("clients.list_clients"))
 
     name = request.form.get("name", "").strip()
@@ -737,6 +741,64 @@ def talon_extend(talon_id):
     )
     flash("Срок действия талона продлен.", "success")
     return redirect(url_for("clients.client_talons", client_id=t.client_id, status="active"))
+
+
+@clients_bp.post("/clients/<int:client_id>/talons/delete-period", endpoint="talons_delete_period")
+@login_required
+def talons_delete_period(client_id):
+    client = Client.query.get_or_404(client_id)
+
+    if not has_role("director", "zamdirector", "deputy_director"):
+        flash("Недостаточно прав для удаления талонов.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+
+    try:
+        valid_from = datetime.strptime((request.form.get("valid_from") or "").strip(), "%Y-%m-%d").date()
+        valid_to = datetime.strptime((request.form.get("valid_to") or "").strip(), "%Y-%m-%d").date()
+    except Exception:
+        flash("Укажите период удаления талонов.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+
+    liters_raw = (request.form.get("liters") or "").strip()
+    liters = None
+    if liters_raw:
+        try:
+            liters = float(liters_raw.replace(",", "."))
+        except ValueError:
+            flash("Неверный номинал для удаления.", "danger")
+            return redirect(url_for("clients.client_talons", client_id=client.id, status="active"))
+
+    q = Talon.query.filter_by(client_id=client.id).filter(
+        Talon.valid_from == valid_from,
+        Talon.valid_to == valid_to,
+        Talon.state != "used",
+    )
+    if liters is not None:
+        q = q.filter(Talon.liters == liters)
+
+    talons = q.all()
+    if not talons:
+        flash("По выбранному периоду талоны не найдены.", "warning")
+        return redirect(url_for("clients.client_talons", client_id=client.id, status="active"))
+
+    deleted = 0
+    restored = 0.0
+    for t in talons:
+        if t.contract_id:
+            bal = Balance.query.filter_by(client_id=t.client_id, contract_id=t.contract_id, product_name=t.product_name).first()
+            if bal is None:
+                bal = Balance.query.filter_by(client_id=t.client_id, contract_id=t.contract_id).first()
+            if bal is not None:
+                bal.liters_left = float(bal.liters_left or 0) + float(t.liters or 0)
+                bal.updated_at = datetime.utcnow()
+                restored += float(t.liters or 0)
+        db.session.delete(t)
+        deleted += 1
+
+    log_audit("delete_talons_period", f"{current_user.username} удалил {deleted} талонов клиента {client.name} за период {valid_from} - {valid_to}", "client", client.id)
+    db.session.commit()
+    flash(f"Удалено талонов: {deleted}. Возвращено в остаток: {restored:.2f} л", "success")
+    return redirect(url_for("clients.client_talons", client_id=client.id, status="active"))
 
 
 @clients_bp.post("/talons/<int:talon_id>/delete")

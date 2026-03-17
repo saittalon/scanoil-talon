@@ -130,31 +130,6 @@
 </nav>
 {% endif %}
 
-
-{% if current_user.role in ['director', 'zamdirector', 'deputy_director'] %}
-<div class="card card-soft section-card mt-4">
-  <div class="section-title">Удалить талоны по периоду</div>
-  <div class="section-subtitle">Удаляются только неиспользованные талоны. Литры автоматически вернутся в остаток по договору.</div>
-  <form method="post" action="{{ url_for('clients.talons_delete_period', client_id=client.id) }}" class="row g-3 mt-1" onsubmit="return confirm('Удалить все неиспользованные талоны за выбранный период?')">
-    <div class="col-md-4">
-      <label class="form-label">Дата начала</label>
-      <input type="date" class="form-control" name="valid_from" required value="{{ date_from or '' }}">
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Дата окончания</label>
-      <input type="date" class="form-control" name="valid_to" required value="{{ date_to or '' }}">
-    </div>
-    <div class="col-md-2">
-      <label class="form-label">Номинал, л</label>
-      <input type="number" step="0.01" min="0.01" class="form-control" name="liters" placeholder="Напр. 10">
-    </div>
-    <div class="col-md-2 d-flex align-items-end">
-      <button class="btn btn-outline-danger w-100">Удалить период</button>
-    </div>
-  </form>
-</div>
-{% endif %}
-
     <style>
       .talon-folder-list{display:grid;gap:14px;}
       .talon-folder{padding:0;border:1px solid rgba(173,196,255,.16)!important;background:linear-gradient(180deg, rgba(12,22,54,.98), rgba(9,17,42,.98))!important;overflow:hidden;}

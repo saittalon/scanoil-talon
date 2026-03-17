@@ -2,142 +2,549 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сканер талонов</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
-    .screen{position:fixed;inset:0;background:#000}
-    #reader,#videoWrap{position:absolute;inset:0}
-    #reader video{width:100%!important;height:100%!important;object-fit:cover!important}
-    .frame{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:3}
-    .box{width:min(74vw,74vh);height:min(74vw,74vh);border:4px solid rgba(255,255,255,.95);border-radius:22px;box-shadow:0 0 0 9999px rgba(0,0,0,.28)}
-    .hint{position:absolute;left:0;right:0;bottom:26px;text-align:center;font-size:18px;font-weight:700;text-shadow:0 2px 10px rgba(0,0,0,.7);padding:0 20px;z-index:3}
-    .status{position:absolute;left:16px;right:16px;top:calc(env(safe-area-inset-top,0px) + 16px);padding:14px 16px;border-radius:18px;background:rgba(17,28,48,.88);backdrop-filter:blur(10px);font-size:17px;z-index:4;text-align:center}
-    .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;opacity:0;pointer-events:none;transition:opacity .15s ease}
-    .overlay.show{opacity:1}
-    .overlay.ok{background:rgba(24,160,76,.94)}
-    .overlay.error{background:rgba(200,34,34,.94)}
-    .icon{font-size:min(42vw,220px);font-weight:900;line-height:1;color:#fff;text-shadow:0 10px 30px rgba(0,0,0,.25)}
+    html,body{height:100%}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#000;color:#fff;overflow:hidden}
+    .wrap{height:100%;max-width:none;margin:0;padding:0}
+    .card{height:100%;background:#000;border-radius:0;padding:0;box-shadow:none;position:relative}
+    h1,p,.btn,.manual-box,.muted,#summary,#list,#finish,#startScan,#showManual{display:none !important}
+    .video-wrap{position:fixed;inset:0;overflow:hidden;background:#000;min-height:100vh}
+    video{width:100vw;height:100vh;display:block;background:#000;object-fit:cover}
+    .frame{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .box{
+      width:72%;
+      aspect-ratio:1/1;
+      border:4px solid rgba(255,255,255,.9);
+      border-radius:18px;
+      box-shadow:0 0 0 9999px rgba(0,0,0,.25);
+      transition:border-color .25s ease, box-shadow .25s ease, transform .15s ease;
+    }
+    .status{
+      margin-top:14px;
+      padding:14px 16px;
+      border-radius:16px;
+      background:#0f1a2e;
+      font-size:18px;
+      line-height:1.4;
+      border:2px solid rgba(255,255,255,.08);
+      transition:background .2s ease,border-color .2s ease,color .2s ease;
+    }
+    .status.ok{
+      border-color:rgba(36,161,72,.55);
+      background:rgba(36,161,72,.12);
+    }
+    .status.error{
+      border-color:rgba(255,90,90,.55);
+      background:rgba(255,90,90,.12);
+    }
+    .status.wait{
+      border-color:rgba(255,255,255,.08);
+      background:#0f1a2e;
+    }
+    .statusIcon{
+      font-size:42px;
+      line-height:1;
+      margin-bottom:8px;
+    }
+    .btn{width:100%;margin-top:14px;padding:18px 16px;border-radius:18px;border:0;background:#24a148;color:#fff;font-weight:800;font-size:28px;line-height:1.15;cursor:pointer}
+    .btn.secondary{background:#3b82f6;font-size:20px}
+    .btn.manual{background:#f59e0b;color:#111827;font-size:22px}
+    .btn:disabled{opacity:.6;cursor:default}
+    .muted{opacity:.9;font-size:16px;margin-top:10px;line-height:1.45}
+    .err{color:#ffb4b4}
+    .hidden{display:none}
+    .manual-box{margin-top:14px;padding:14px;border-radius:16px;background:#0f1a2e}
+    .input{width:100%;box-sizing:border-box;padding:16px;border-radius:16px;border:2px solid #25314c;background:#0b1320;color:#fff;font-size:26px;font-weight:700;letter-spacing:1px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .row .btn{flex:1}
+
+    .flash-result{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .15s ease;
+    }
+    .flash-result.show{
+      opacity:1;
+    }
+    .flash-result.ok{
+      background:rgba(20,160,80,.92);
+    }
+    .flash-result.error{
+      background:rgba(200,40,40,.92);
+    }
+    .flash-icon{
+      font-size:220px;
+      line-height:1;
+      color:#fff;
+      transform:scale(.6);
+      transition:transform .15s ease;
+      text-shadow:0 10px 30px rgba(0,0,0,.25);
+    }
+    .flash-result.show .flash-icon{
+      transform:scale(1);
+    }
+
+    @media (max-width:480px){
+      h1{font-size:24px}
+      p,.status{font-size:17px}
+      .btn{font-size:24px}
+      .btn.manual{font-size:20px}
+      .input{font-size:22px}
+      .flash-icon{font-size:170px}
+    }
   </style>
 </head>
 <body>
-<div class="screen">
-  <div id="reader"></div>
-  <div class="frame"><div class="box"></div></div>
-  <div id="status" class="status">Открываю камеру…</div>
-  <div class="hint">Наведите камеру на QR-код талона</div>
-</div>
-<div id="overlay" class="overlay"><div id="icon" class="icon"></div></div>
+  <div class="wrap">
+    <div class="card">
+
+      <div id="scannerArea" class="hidden">
+        <div class="video-wrap" style="margin-top:14px;">
+          <video id="video" playsinline muted></video>
+          <div class="frame"><div class="box"></div></div>
+        </div>
+      </div>
+
+      <div id="status" class="status wait">
+        <div id="statusIcon" class="statusIcon">⏳</div>
+        <div id="statusText">Ожидание запуска сканера…</div>
+      </div>
+
+<button id="retry" class="btn hidden">ПОВТОРИТЬ</button>    </div>
+  </div>
+
+  <div id="flashResult" class="flash-result">
+    <div id="flashIcon" class="flash-icon"></div>
+  </div>
+
 <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
 <script>
 const TOKEN = {{ token|tojson }};
-const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-if(tg){ try{ tg.ready(); tg.expand(); }catch(e){} }
-const INIT_DATA = tg && tg.initData ? tg.initData : "";
+const INIT_DATA = (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) ? Telegram.WebApp.initData : "";
 const statusEl = document.getElementById('status');
-const overlay = document.getElementById('overlay');
-const iconEl = document.getElementById('icon');
-let scanner = null;
-let inFlight = false;
-let closed = false;
-let audioCtx = null;
-let lastCode = '';
-let lastCodeAt = 0;
+const statusIconEl = document.getElementById('statusIcon');
+const statusTextEl = document.getElementById('statusText');
+const video = document.getElementById('video');
+const retryBtn = document.getElementById('retry');
+const startBtn = document.getElementById('startScan');
+const scannerArea = document.getElementById('scannerArea');
+const boxEl = document.querySelector('.box');
+const flashResultEl = document.getElementById('flashResult');
+const flashIconEl = document.getElementById('flashIcon');
 
-function setStatus(text){ statusEl.textContent = text; }
-function vibrate(type){ try{ navigator.vibrate && navigator.vibrate(type==='ok' ? [60] : [120,60,120]); }catch(e){} }
-function haptic(type){ try{ if(tg && tg.HapticFeedback){ tg.HapticFeedback.notificationOccurred(type === 'ok' ? 'success' : 'error'); } }catch(e){} }
-function ensureAudio(){ try{ if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if(audioCtx.state === 'suspended') audioCtx.resume(); }catch(e){} }
-function beep(type){
+let soundUnlocked = false;
+let audioCtx = null;
+
+function ensureAudioContext(){
   try{
-    ensureAudio();
-    if(!audioCtx) return;
-    const now = audioCtx.currentTime;
-    const plan = type === 'ok' ? [880,1174] : [220,180];
-    plan.forEach((freq, i) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sine'; osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, now + i*0.11);
-      gain.gain.exponentialRampToValueAtTime(0.2, now + i*0.11 + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + i*0.11 + 0.10);
-      osc.connect(gain); gain.connect(audioCtx.destination);
-      osc.start(now + i*0.11); osc.stop(now + i*0.11 + 0.11);
-    });
+    if(!audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if(audioCtx && audioCtx.state === 'suspended'){
+      audioCtx.resume();
+    }
   }catch(e){}
 }
-function showOverlay(type){ overlay.className = 'overlay show ' + type; iconEl.textContent = type === 'ok' ? '✓' : '✕'; }
-function hideOverlay(){ overlay.className = 'overlay'; }
-function sendToBot(payload){ try{ if(tg){ tg.sendData(JSON.stringify(payload)); } }catch(e){} }
-async function finish(type, payload){
-  if(closed) return;
-  closed = true;
-  showOverlay(type);
-  beep(type);
-  vibrate(type);
-  haptic(type);
-  sendToBot(payload);
-  try{ if(scanner){ await scanner.stop(); await scanner.clear(); scanner = null; } }catch(e){}
-  setTimeout(() => { try{ tg && tg.close(); }catch(e){} }, 1200);
+
+async function unlockSound(){
+  if(soundUnlocked) return;
+  ensureAudioContext();
+  soundUnlocked = true;
 }
+
+function beep(freq, duration){
+  try{
+    ensureAudioContext();
+    if(!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.value = 0.001;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration / 1000);
+    osc.start(now);
+    osc.stop(now + duration / 1000 + 0.02);
+  }catch(e){}
+}
+
+function setStatus(text, mode='wait'){
+  if(statusTextEl){
+    statusTextEl.textContent = text;
+  }else{
+    statusEl.textContent = text;
+  }
+
+  if(statusIconEl){
+    if(mode === 'ok'){
+      statusIconEl.textContent = '✅';
+    } else if(mode === 'error'){
+      statusIconEl.textContent = '❌';
+    } else if(mode === 'scan'){
+      statusIconEl.textContent = '📷';
+    } else if(mode === 'check'){
+      statusIconEl.textContent = '⏳';
+    } else {
+      statusIconEl.textContent = '⏳';
+    }
+  }
+
+  statusEl.classList.remove('ok', 'error', 'wait');
+
+  if(mode === 'ok'){
+    statusEl.classList.add('ok');
+  } else if(mode === 'error'){
+    statusEl.classList.add('error');
+  } else {
+    statusEl.classList.add('wait');
+  }
+}
+
+function flashResult(type){
+  if(!flashResultEl || !flashIconEl) return;
+
+  flashResultEl.classList.remove('ok', 'error');
+
+  if(type === 'ok'){
+    flashIconEl.textContent = '✓';
+    flashResultEl.classList.add('ok');
+  }else{
+    flashIconEl.textContent = '✕';
+    flashResultEl.classList.add('error');
+  }
+
+  flashResultEl.classList.add('show');
+
+  setTimeout(()=>{
+    flashResultEl.classList.remove('show');
+  }, 1000);
+}
+
+function flashBox(kind){
+  if(!boxEl) return;
+
+  if(kind === 'ok'){
+    boxEl.style.borderColor = '#24a148';
+    boxEl.style.boxShadow = '0 0 0 9999px rgba(36,161,72,.10)';
+    boxEl.style.transform = 'scale(1.02)';
+    setTimeout(() => {
+      boxEl.style.borderColor = 'rgba(255,255,255,.9)';
+      boxEl.style.boxShadow = '0 0 0 9999px rgba(0,0,0,.25)';
+      boxEl.style.transform = 'scale(1)';
+    }, 280);
+    return;
+  }
+
+  boxEl.style.borderColor = '#ff5a5a';
+  boxEl.style.boxShadow = '0 0 0 9999px rgba(255,90,90,.10)';
+  boxEl.style.transform = 'scale(1.02)';
+  setTimeout(() => {
+    boxEl.style.borderColor = 'rgba(255,255,255,.9)';
+    boxEl.style.boxShadow = '0 0 0 9999px rgba(0,0,0,.25)';
+    boxEl.style.transform = 'scale(1)';
+  }, 380);
+}
+
+function playSuccessFeedback(){
+  beep(1200, 140);
+  setTimeout(()=>beep(1600, 180), 120);
+  flashBox('ok');
+  flashResult('ok');
+}
+
+function playErrorFeedback(){
+  beep(260, 220);
+  setTimeout(()=>beep(180, 260), 140);
+  try{
+    navigator.vibrate && navigator.vibrate([80,60,80]);
+  }catch(e){}
+  try{
+    if(window.Telegram && Telegram.WebApp && Telegram.WebApp.HapticFeedback){
+      Telegram.WebApp.HapticFeedback.notificationOccurred("error");
+    }
+  }catch(e){}
+  flashBox('err');
+  flashResult('error');
+}
+
+let stream = null;
+let detector = null;
+let scanning = false;
+let inFlight = false;
+let html5Scanner = null;
+let fallbackMode = false;
+const seen = new Map();
+let okCount = 0;
+
+function addToList(kind, text){ console.log(kind, text); }
+
+function bumpCount(){}
+
 function normalizeCode(raw){
   let code = String(raw || '').trim();
-  try{ const u = new URL(code); code = u.searchParams.get('code') || u.searchParams.get('talon') || u.searchParams.get('id') || code; }catch(e){}
-  const m = code.match(/(\d{6,})/); return m ? m[1] : code;
+  try{
+    const url = new URL(code);
+    const qp = url.searchParams.get('code') || url.searchParams.get('talon') || url.searchParams.get('id');
+    if(qp) code = qp;
+  }catch(e){}
+  const m = code.match(/(\d{6,})/);
+  if(m) code = m[1];
+  return code;
 }
-function formatNow(){
-  try{ return new Date().toLocaleString('ru-RU', { hour12:false }); }catch(e){ return ''; }
-}
-async function submitCode(raw){
-  const code = normalizeCode(raw);
-  if(!code || inFlight || closed) return;
+
+function cleanupSeen(){
   const now = Date.now();
-  if(code === lastCode && now - lastCodeAt < 2500) return;
-  lastCode = code; lastCodeAt = now; inFlight = true;
-  setStatus('Проверяю талон…');
+  for(const [k, ts] of seen.entries()){
+    if(now - ts > 15000) seen.delete(k);
+  }
+}
+
+async function submitCode(rawCode){
+  const code = normalizeCode(rawCode);
+  if(!code){
+    addToList('err', '❌ Не удалось распознать код.');
+    setStatus('Не удалось распознать код.', 'error');
+    playErrorFeedback();
+    return;
+  }
+
   try{
     const res = await fetch('/tg/api/scan', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ token: TOKEN, code, initData: INIT_DATA })
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({token: TOKEN, code, initData: INIT_DATA})
     });
-    const data = await res.json().catch(() => ({ok:false,error:'bad_json'}));
+
+    const data = await res.json().catch(()=>({ok:false,error:'bad_json'}));
+
     if(res.ok && data.ok){
-      await finish('ok', { kind:'accepted', code, serial:data.serial || '', liters:data.liters || '', product:data.product || '', agzs:data.agzs || '', time:formatNow() });
+      okCount += 1;
+      bumpCount();
+      setStatus('Талон принят.', 'ok');
+      playSuccessFeedback();
+      setTimeout(()=>{
+        if(window.Telegram && Telegram.WebApp){
+          Telegram.WebApp.close();
+        }
+      }, 1200);
       return;
     }
+
     if(data.error === 'already_used'){
-      await finish('error', { kind:'already_used', code, agzs:data.agzs || '', used_at:data.used_at || '' });
+      setStatus('Талон уже использован.', 'error');
+      playErrorFeedback();
+      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
+    } else if(data.error === 'talon_not_found'){
+      setStatus('Талон не найден.', 'error');
+      playErrorFeedback();
+      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
+    } else if(data.error === 'expired'){
+      setStatus('Срок действия талона истёк.', 'error');
+      playErrorFeedback();
+      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
+    } else if(data.error === 'token_expired' || data.error === 'not_logged_in'){
+      scanning = false;
+      retryBtn.classList.remove('hidden');
+      setStatus('Сессия истекла.', 'error');
+      playErrorFeedback();
       return;
-    }
-    if(data.error === 'expired'){
-      await finish('error', { kind:'expired', code, valid_to:data.valid_to || '' });
+    } else if(data.error === 'invalid_telegram_context'){
+      setStatus('Недействительная Telegram-сессия.', 'error');
+      playErrorFeedback();
       return;
-    }
-    if(data.error === 'talon_not_found'){
-      await finish('error', { kind:'not_found', code });
+    } else if(data.error === 'missing_token_or_code'){
+      setStatus('Пустой код.', 'error');
+      playErrorFeedback();
       return;
+    } else {
+      setStatus('Ошибка при обработке талона.', 'error');
+      playErrorFeedback();
+      setTimeout(()=>{ if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.close(); } }, 1400);
     }
-    await finish('error', { kind:'error', code });
-  }catch(e){
-    await finish('error', { kind:'error', code });
-  } finally { inFlight = false; }
+  } catch(e){
+    console.error(e);
+    setStatus('Ошибка сети.', 'error');
+    playErrorFeedback();
+  }
 }
-async function start(){
-  ensureAudio();
-  setStatus('Открываю камеру…');
-  scanner = new Html5Qrcode('reader');
-  await scanner.start(
+
+async function handleDetected(raw){
+  const code = normalizeCode(raw);
+  if(!code || inFlight) return;
+
+  const now = Date.now();
+  const last = seen.get(code);
+  if(last && (now - last) <= 2500) return;
+
+  seen.set(code, now);
+  inFlight = true;
+  setStatus('Проверяю талон…', 'check');
+  await submitCode(code);
+  if(scanning) setStatus('Готово. Наведите на следующий QR…', 'scan');
+  inFlight = false;
+}
+
+async function scanLoop(){
+  if(!scanning || fallbackMode || !detector) return;
+  cleanupSeen();
+
+  if(!inFlight){
+    try{
+      const codes = await detector.detect(video);
+      if(codes && codes.length){
+        await handleDetected((codes[0].rawValue || '').trim());
+      }
+    } catch(e){
+      console.error(e);
+    }
+  }
+
+  requestAnimationFrame(scanLoop);
+}
+
+async function startBarcodeDetectorMode(){
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' } },
+    audio:false
+  });
+
+  video.srcObject = stream;
+  await video.play();
+
+  detector = new BarcodeDetector({formats:['qr_code']});
+  fallbackMode = false;
+  scanning = true;
+  setStatus('Готово. Наведите на QR…', 'scan');
+  scanLoop();
+}
+
+async function startHtml5QrcodeFallback(){
+  fallbackMode = true;
+  setStatus('Запущен резервный сканер QR…', 'scan');
+
+  try{
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+  }catch(e){}
+
+  let reader = document.getElementById('reader');
+  if(!reader){
+    reader = document.createElement('div');
+    reader.id = 'reader';
+    reader.style.marginTop = '14px';
+    scannerArea.appendChild(reader);
+  }
+
+  html5Scanner = new Html5Qrcode('reader');
+  await html5Scanner.start(
     { facingMode: 'environment' },
-    { fps: 10, qrbox: { width: 260, height: 260 }, aspectRatio: 1.7778 },
-    decodedText => submitCode(decodedText),
+    { fps: 10, qrbox: { width: 240, height: 240 } },
+    async (decodedText) => { await handleDetected(decodedText); },
     () => {}
   );
-  setStatus('Наведите камеру на QR-код талона');
+
+  scanning = true;
+  setStatus('Готово. Наведите на QR…', 'scan');
 }
-document.addEventListener('click', ensureAudio, {passive:true});
-document.addEventListener('touchstart', ensureAudio, {passive:true});
-window.addEventListener('load', () => start().catch(() => setStatus('Не удалось открыть камеру. Проверьте доступ к камере и откройте сканер снова.')));
+
+async function startCamera(){
+  retryBtn.classList.add('hidden');
+  scannerArea.classList.remove('hidden');
+  startBtn.disabled = true;
+
+  try{
+    setStatus('Открываю камеру…', 'check');
+
+    if('BarcodeDetector' in window){
+      try{
+        await startBarcodeDetectorMode();
+        return;
+      } catch(e){
+        console.error('BarcodeDetector failed, switching to fallback', e);
+      }
+    }
+
+    if(window.Html5Qrcode){
+      await startHtml5QrcodeFallback();
+      return;
+    }
+
+    throw new Error('scanner_not_supported');
+  } catch(e){
+    console.error(e);
+    setStatus('Не удалось открыть камеру. Разрешите доступ к камере или введите код вручную.', 'error');
+    retryBtn.classList.remove('hidden');
+    startBtn.disabled = false;
+  }
+}
+
+async function stopCamera(){
+  scanning = false;
+  detector = null;
+  inFlight = false;
+  fallbackMode = false;
+
+  try{
+    if(html5Scanner){
+      await html5Scanner.stop();
+      await html5Scanner.clear();
+      html5Scanner = null;
+    }
+  }catch(e){
+    console.error(e);
+  }
+
+  try{
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+  }catch(e){}
+
+  try{
+    video.srcObject = null;
+  }catch(e){}
+}
+
+startBtn.addEventListener('click', async ()=>{
+  await unlockSound();
+  await startCamera();
+});
+
+retryBtn.addEventListener('click', async ()=>{
+  await stopCamera();
+  await unlockSound();
+  await startCamera();
+});
+
+
+bumpCount();
+document.addEventListener("DOMContentLoaded", async ()=>{
+  try{
+    if(window.Telegram && Telegram.WebApp){
+      Telegram.WebApp.ready();
+      Telegram.WebApp.expand();
+      Telegram.WebApp.disableVerticalSwipes && Telegram.WebApp.disableVerticalSwipes();
+    }
+  }catch(e){}
+  await unlockSound();
+  await startCamera();
+})
 </script>
 </body>
 </html>

@@ -74,17 +74,10 @@ def balance_set(client_id):
         return redirect(url_for("clients.client_contracts", client_id=client.id))
 
     liters_raw = (request.form.get("liters_left") or "").strip()
-    delta_raw = (request.form.get("liters_delta") or "").strip()
-
     try:
         liters_left = float((liters_raw or "0").replace(",", "."))
     except ValueError:
         liters_left = 0.0
-
-    try:
-        liters_delta = float((delta_raw or "0").replace(",", "."))
-    except ValueError:
-        liters_delta = 0.0
 
     balance_control = bool(request.form.get("balance_control"))
     product_name = (request.form.get("product_name") or "ГАЗ").strip() or "ГАЗ"
@@ -111,19 +104,6 @@ def balance_set(client_id):
 
     old_liters = float(bal.liters_left or 0) if bal else 0.0
 
-    if not can_approve_balances():
-        requested_delta = liters_delta
-        if abs(requested_delta) < 1e-9:
-            flash("Укажите, на сколько литров нужно изменить остаток.", "danger")
-            return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
-        liters_left = old_liters + requested_delta
-        if liters_left < 0:
-            flash("После изменения остаток не может быть меньше нуля.", "danger")
-            return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
-        if not comment:
-            sign = "+" if requested_delta >= 0 else ""
-            comment = f"Изменение остатка на {sign}{requested_delta:.2f} л"
-
     if can_approve_balances():
         if bal is None:
             bal = Balance(client_id=client.id, contract_id=contract_id, product_name=product_name)
@@ -136,15 +116,6 @@ def balance_set(client_id):
         db.session.commit()
         notify_event("Обновлен остаток", f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}")
         flash("Остаток обновлён.", "success")
-        return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
-
-    existing_pending = BalanceChangeRequest.query.filter_by(
-        client_id=client.id,
-        contract_id=contract_id,
-        status="pending"
-    ).first()
-    if existing_pending:
-        flash("По этому договору уже есть необработанная заявка на изменение остатка.", "warning")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
     req = BalanceChangeRequest(
@@ -360,15 +331,14 @@ def client_contracts(client_id):
         selected = contracts[0]
 
     balance_requests = []
-    all_balance_requests = (
-        BalanceChangeRequest.query
-        .filter_by(client_id=client.id)
-        .order_by(BalanceChangeRequest.created_at.desc())
-        .limit(50)
-        .all()
-    )
     if selected:
-        balance_requests = [r for r in all_balance_requests if r.contract_id == selected.id][:20]
+        balance_requests = (
+            BalanceChangeRequest.query
+            .filter_by(client_id=client.id, contract_id=selected.id)
+            .order_by(BalanceChangeRequest.created_at.desc())
+            .limit(20)
+            .all()
+        )
 
     return render_template(
         "client_contracts.html",
@@ -376,7 +346,6 @@ def client_contracts(client_id):
         contracts=contracts,
         selected=selected,
         balance_requests=balance_requests,
-        all_balance_requests=all_balance_requests,
         tabs=_client_tabs(client),
         active_tab="contract",
         timedelta=timedelta,
@@ -713,15 +682,6 @@ def client_talons_add(client_id):
         ).first()
         if bal is None:
             bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id).first()
-
-    pending_balance_request = BalanceChangeRequest.query.filter_by(
-        client_id=client.id,
-        contract_id=contract_id,
-        status="pending"
-    ).first()
-    if pending_balance_request:
-        flash("По этому договору есть неподтверждённая заявка на изменение остатка. Сначала дождитесь подтверждения директора или замдиректора.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=client.id))
 
     if bal is not None and bal.balance_control:
         left = float(bal.liters_left or 0)

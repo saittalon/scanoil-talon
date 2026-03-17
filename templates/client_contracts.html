@@ -195,54 +195,104 @@
               <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <form method="post" action="{{ url_for('clients.balance_set', client_id=client.id) }}">
-              <div class="modal-body">
-                <input type="hidden" name="contract_id" value="{{ selected.id }}">
-                <div class="row g-3">
-                  <div class="col-md-6">
-                    <label class="form-label">Договор</label>
-                    <input class="form-control" value="{{ selected.number }}" disabled>
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">Дата от</label>
-                    <input class="form-control" value="{{ selected.date_from }}" disabled>
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">Дата до</label>
-                    <input class="form-control" value="{{ selected.date_to or '' }}" disabled>
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label">Товар</label>
-                    <input class="form-control" name="product_name" value="ГАЗ" readonly>
-                  </div>
-                  <div class="col-md-6 d-flex align-items-end">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" name="balance_control" id="bc" {% if not balance or balance.balance_control %}checked{% endif %}>
-                      <label class="form-check-label" for="bc">Контролировать баланс</label>
-                    </div>
-                  </div>
-                  <div class="col-12">
-                    <div class="info-card">
-                      <div class="client-meta mb-2">Быстрые кнопки пополнения</div>
-                      <div class="liter-badges mb-3">
-                        {% for add in [50,100,250,500,1000,5000,10000] %}
-                          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addLiters({{ add }})">+{{ add }} л</button>
-                        {% endfor %}
-                      </div>
-                      <label class="form-label">Новый остаток, л</label>
-                      <input class="form-control" id="litersInput" name="liters_left" value="{{ balance.liters_left if balance else 0 }}" required>
-                      {% if current_role not in ["director","zamdirector","deputy_director"] %}<div class="client-meta mt-2">Исполнитель отправляет заявку, а директор/замдиректора должен подтвердить или отклонить её.</div>{% else %}<div class="client-meta mt-2">Директор/замдиректора меняет остаток сразу.</div>{% endif %}
-                      <div id="balanceChangePreview" class="alert alert-light border mt-3 mb-0"></div>
-                      <label class="form-label mt-3">Комментарий</label>
-                      <input class="form-control" name="comment" placeholder="Например: исправление номинала / пополнение остатка">
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="modal-footer">
-                <button class="btn btn-brand">{% if current_role in ["director","zamdirector","deputy_director"] %}Сохранить остаток{% else %}Отправить заявку{% endif %}</button>
-                <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отменить</button>
-              </div>
-            </form>
+  <div class="modal-body">
+    <input type="hidden" name="contract_id" value="{{ selected.id }}">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Договор</label>
+        <input class="form-control" value="{{ selected.number }}" disabled>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label">Дата от</label>
+        <input class="form-control" value="{{ selected.date_from }}" disabled>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label">Дата до</label>
+        <input class="form-control" value="{{ selected.date_to or '' }}" disabled>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Товар</label>
+        <input class="form-control" name="product_name" value="ГАЗ" readonly>
+      </div>
+
+      <div class="col-md-6 d-flex align-items-end">
+        <div class="form-check">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            name="balance_control"
+            id="bc"
+            {% if not balance or balance.balance_control %}checked{% endif %}
+          >
+          <label class="form-check-label" for="bc">Контролировать баланс</label>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <div class="info-card">
+          <div class="client-meta mb-2">Быстрые кнопки пополнения</div>
+
+          <div class="liter-badges mb-3">
+            {% for add in [50,100,250,500,1000,5000,10000] %}
+              <button
+                type="button"
+                class="btn btn-outline-secondary btn-sm"
+                onclick="addLiters({{ add }})"
+              >
+                +{{ add }} л
+              </button>
+            {% endfor %}
+          </div>
+
+          <label class="form-label">Новый остаток, л</label>
+          <input
+            class="form-control"
+            id="litersInput"
+            name="liters_left"
+            type="number"
+            step="0.01"
+            min="0"
+            value="{{ balance.liters_left if balance else 0 }}"
+            required
+          >
+
+          {% if current_role not in ["director","zamdirector","deputy_director"] %}
+            <div class="client-meta mt-2">
+              Исполнитель отправляет заявку, а директор/замдиректора должен подтвердить или отклонить её.
+            </div>
+          {% else %}
+            <div class="client-meta mt-2">
+              Директор/замдиректора меняет остаток сразу.
+            </div>
+          {% endif %}
+
+          <div id="balanceChangePreview" class="alert alert-light border mt-3 mb-0"></div>
+
+          <label class="form-label mt-3">Комментарий</label>
+          <input
+            class="form-control"
+            name="comment"
+            placeholder="Например: исправление номинала / пополнение остатка"
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-footer">
+    <button type="submit" class="btn btn-brand">
+      {% if current_role in ["director","zamdirector","deputy_director"] %}
+        Сохранить остаток
+      {% else %}
+        Отправить заявку
+      {% endif %}
+    </button>
+    <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отменить</button>
+  </div>
+</form>
           </div>
         </div>
       </div>

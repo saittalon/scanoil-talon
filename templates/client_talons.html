@@ -6,11 +6,7 @@
   <div class="card-body">
     <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
       <h5 class="mb-0">Талоны</h5>
-      {% if pending_contract_ids %}
-      <button class="btn btn-secondary btn-sm" type="button" disabled>Создать талоны</button>
-      {% else %}
       <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addTalonsModal">Создать талоны</button>
-      {% endif %}
       <form class="d-flex flex-wrap align-items-end gap-2" method="get" action="{{ url_for('clients.client_talons', client_id=client.id) }}">
         <input type="hidden" name="status" value="{{ status or 'active' }}">
         <div>
@@ -26,11 +22,6 @@
       </form>
     </div>
 
-
-
-    {% if pending_contract_ids %}
-    <div class="alert alert-warning mt-3 mb-0">Есть неподтвержденная заявка на изменение остатка. Пока директор или замдиректора не подтвердит ее, создание талонов заблокировано.</div>
-    {% endif %}
     <div class="mt-3 d-flex gap-2 flex-wrap">
       <a href="{{ url_for('clients.client_talons', client_id=client.id, status='active', date_from=date_from, date_to=date_to) }}"
          class="btn btn-sm {% if status == 'active' %}btn-primary{% else %}btn-outline-primary{% endif %}">

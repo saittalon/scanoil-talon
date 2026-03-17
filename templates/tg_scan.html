@@ -109,7 +109,6 @@
     canvas {
       display: none;
     }
-
   </style>
 </head>
 <body>
@@ -130,7 +129,7 @@
 
   <!-- УСПЕХ -->
   <audio id="okAudio" preload="auto">
-    <source src="{{ url_for('static', filename='scan.wav') }}" type="audio/wav">
+    <source src="{{ url_for('static', filename='success.wav') }}" type="audio/wav">
   </audio>
 
   <!-- ОШИБКА -->
@@ -159,6 +158,9 @@
     let busy = false;
     let lastCode = "";
     let lastAt = 0;
+    let audioUnlocked = false;
+    let cameraStarting = false;
+    let cachedDeviceId = "";
 
     if (tg) {
       tg.ready();
@@ -187,13 +189,72 @@
     }
 
     async function unlockAudio() {
+      if (audioUnlocked) return true;
+
       try {
         okAudio.muted = false;
         errAudio.muted = false;
         okAudio.volume = 1;
         errAudio.volume = 1;
+
         okAudio.load();
         errAudio.load();
+
+        audioUnlocked = true;
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function getStoredDeviceId() {
+      try {
+        return localStorage.getItem("tg_scan_camera_device_id") || "";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function storeDeviceId(deviceId) {
+      if (!deviceId) return;
+      cachedDeviceId = deviceId;
+      try {
+        localStorage.setItem("tg_scan_camera_device_id", deviceId);
+        localStorage.setItem("tg_scan_camera_allowed", "1");
+      } catch (e) {}
+    }
+
+    async function getCameraPermissionState() {
+      try {
+        if (!navigator.permissions || !navigator.permissions.query) return "unknown";
+        const status = await navigator.permissions.query({ name: "camera" });
+        return status && status.state ? status.state : "unknown";
+      } catch (e) {
+        return "unknown";
+      }
+    }
+
+    function hasLiveStream() {
+      try {
+        return !!(stream && stream.getVideoTracks && stream.getVideoTracks().some(t => t.readyState === "live"));
+      } catch (e) {
+        return false;
+      }
+    }
+
+    async function rememberActiveCamera() {
+      try {
+        const track = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+        const settings = track && track.getSettings ? track.getSettings() : null;
+        if (settings && settings.deviceId) {
+          storeDeviceId(settings.deviceId);
+          return;
+        }
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const backCam = devices.find(d => d.kind === "videoinput" && /back|rear|environment|зад/i.test(d.label || ""));
+        const anyCam = devices.find(d => d.kind === "videoinput");
+        storeDeviceId((backCam && backCam.deviceId) || (anyCam && anyCam.deviceId) || "");
       } catch (e) {}
     }
 
@@ -203,15 +264,10 @@
         el.currentTime = 0;
         el.muted = false;
         el.volume = 1;
+
         const p = el.play();
         if (p && typeof p.catch === "function") {
-          p.catch(() => {
-            try {
-              document.body.addEventListener('click', () => {
-                try { el.currentTime = 0; el.play().catch(() => {}); } catch (e) {}
-              }, { once: true });
-            } catch (e) {}
-          });
+          p.catch(() => {});
         }
       } catch (e) {}
     }
@@ -362,34 +418,69 @@
     }
 
     async function startCamera() {
+      if (cameraStarting || hasLiveStream()) {
+        if (hasLiveStream()) {
+          try {
+            video.srcObject = stream;
+            await video.play();
+          } catch (e) {}
+        }
+        return;
+      }
+
+      cameraStarting = true;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" }
-          },
-          audio: false
-        });
+        await unlockAudio();
+
+        const permissionState = await getCameraPermissionState();
+        if (permissionState === "denied") {
+          showResult("error", "Нет доступа к камере", "Разрешите камеру для этого сайта в Telegram/браузере");
+          return;
+        }
+
+        cachedDeviceId = cachedDeviceId || getStoredDeviceId();
+
+        const constraints = cachedDeviceId
+          ? { video: { deviceId: { exact: cachedDeviceId } }, audio: false }
+          : { video: { facingMode: { ideal: "environment" } }, audio: false };
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" } },
+            audio: false
+          });
+        }
 
         video.srcObject = stream;
+        video.setAttribute("playsinline", "true");
         await video.play();
+        await rememberActiveCamera();
 
         if (!("BarcodeDetector" in window)) {
           showResult("error", "Сканер не поддерживается", "Откройте WebApp на другом устройстве");
           return;
         }
 
-        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        detector = detector || new BarcodeDetector({ formats: ["qr_code"] });
         setStatus("📷 Наведите камеру на QR талона");
         setTimeout(scanOnce, 250);
       } catch (e) {
         showResult("error", "Не удалось открыть камеру");
+      } finally {
+        cameraStarting = false;
       }
     }
 
     window.addEventListener("load", async () => {
-      await unlockAudio();
-
       startCamera();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && active && !busy && !hasLiveStream()) {
+        startCamera();
+      }
     });
 
     window.addEventListener("beforeunload", () => {

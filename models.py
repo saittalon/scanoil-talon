@@ -119,32 +119,28 @@ class BalanceChangeRequest(db.Model):
     __tablename__ = "balance_change_requests"
 
     id = db.Column(db.Integer, primary_key=True)
-
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False, index=True)
-    client = db.relationship("Client", backref=db.backref("balance_change_requests", lazy=True))
-
-    contract_id = db.Column(db.Integer, db.ForeignKey("contract.id"), nullable=False, index=True)
-    contract = db.relationship("Contract", backref=db.backref("balance_change_requests", lazy=True, order_by="BalanceChangeRequest.id.desc()"))
-
+    contract_id = db.Column(db.Integer, db.ForeignKey("contract.id"), nullable=True, index=True)
     balance_id = db.Column(db.Integer, db.ForeignKey("balance.id"), nullable=True, index=True)
-    balance = db.relationship("Balance", backref=db.backref("change_requests", lazy=True, order_by="BalanceChangeRequest.id.desc()"))
 
     requested_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    requested_by = db.relationship("User", foreign_keys=[requested_by_user_id])
-
     approved_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
 
     product_name = db.Column(db.String(50), default="ГАЗ")
     old_liters = db.Column(db.Float, nullable=True)
     requested_liters = db.Column(db.Float, nullable=False)
     balance_control = db.Column(db.Boolean, default=True)
-
     comment = db.Column(db.String(500), nullable=True)
     status = db.Column(db.String(20), default="pending", index=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     decided_at = db.Column(db.DateTime, nullable=True, index=True)
+
+    client = db.relationship("Client", backref=db.backref("balance_change_requests", lazy=True))
+    contract = db.relationship("Contract", backref=db.backref("balance_change_requests", lazy=True))
+    balance = db.relationship("Balance", backref=db.backref("change_requests", lazy=True))
+    requested_by = db.relationship("User", foreign_keys=[requested_by_user_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
 
 
 class Talon(db.Model):

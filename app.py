@@ -1,4 +1,6 @@
 import os
+import json
+from urllib import request as urllib_request, parse as urllib_parse
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -6,8 +8,6 @@ from sqlalchemy import text
 from flask import (
     Flask, redirect, url_for, request, jsonify, render_template, abort, flash, send_file, g
 )
-from urllib.request import Request, urlopen
-import json as _json
 from flask_login import LoginManager, login_required
 from supabase import create_client
 
@@ -16,7 +16,7 @@ from backup_utils import build_backup_zip, upload_backup_bytes_to_supabase
 from models import (
     db,
     User, Talon, BotSession, TalonRedemption, WebAppToken,
-    ContractFile
+    ContractFile, Balance, BalanceChangeRequest
 )
 from auth import auth_bp
 from clients import clients_bp
@@ -62,6 +62,64 @@ def _ensure_performance_indexes():
 
 import logging
 from logging.handlers import RotatingFileHandler
+
+
+def _send_telegram_message(chat_id: str, text: str):
+    bot_token = (os.getenv("BOT_TOKEN") or "").strip()
+    if not bot_token or not chat_id or not text:
+        return False
+    try:
+        data = urllib_parse.urlencode({"chat_id": str(chat_id), "text": text}).encode("utf-8")
+        req = urllib_request.Request(f"https://api.telegram.org/bot{bot_token}/sendMessage", data=data)
+        with urllib_request.urlopen(req, timeout=10) as resp:
+            return 200 <= getattr(resp, 'status', 200) < 300
+    except Exception:
+        return False
+
+
+def _ensure_balance_change_request_schema():
+    statements = [
+        """CREATE TABLE IF NOT EXISTS balance_change_requests (
+            id SERIAL PRIMARY KEY,
+            client_id INTEGER NOT NULL REFERENCES client(id),
+            contract_id INTEGER NULL REFERENCES contract(id),
+            balance_id INTEGER NULL REFERENCES balance(id),
+            requested_by_user_id INTEGER NOT NULL REFERENCES "user"(id),
+            approved_by_user_id INTEGER NULL REFERENCES "user"(id),
+            product_name VARCHAR(50) DEFAULT 'ГАЗ',
+            old_liters DOUBLE PRECISION NULL,
+            requested_liters DOUBLE PRECISION NULL,
+            balance_control BOOLEAN DEFAULT TRUE,
+            comment VARCHAR(500) NULL,
+            status VARCHAR(20) DEFAULT 'pending',
+            created_at TIMESTAMP NULL,
+            decided_at TIMESTAMP NULL
+        )""",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS client_id INTEGER NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS contract_id INTEGER NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS balance_id INTEGER NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS requested_by_user_id INTEGER NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS approved_by_user_id INTEGER NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS product_name VARCHAR(50) DEFAULT 'ГАЗ'",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS old_liters DOUBLE PRECISION NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS requested_liters DOUBLE PRECISION NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS balance_control BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS comment VARCHAR(500) NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending'",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP NULL",
+        "UPDATE balance_change_requests SET requested_liters = old_liters WHERE requested_liters IS NULL AND old_liters IS NOT NULL",
+        "UPDATE balance_change_requests SET created_at = NOW() WHERE created_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_balance_change_requests_client_contract ON balance_change_requests (client_id, contract_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_balance_change_requests_status ON balance_change_requests (status)",
+    ]
+    for stmt in statements:
+        try:
+            db.session.execute(text(stmt))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
 
 
 def _configure_logging(app):
@@ -144,6 +202,7 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        _ensure_balance_change_request_schema()
         _ensure_performance_indexes()
         _ensure_only_allowed_users()
 
@@ -341,11 +400,9 @@ def create_app():
         if not token or not code:
             return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
 
-        tg_user = None
-        if init_data:
-            ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())
-            if not ok:
-                return jsonify({"ok": False, "error": "invalid_telegram_context", "reason": reason}), 401
+        ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())
+        if not ok:
+            return jsonify({"ok": False, "error": "invalid_telegram_context", "reason": reason}), 401
 
         t = WebAppToken.query.filter_by(token=token).first()
         if t is None:
@@ -364,8 +421,8 @@ def create_app():
             if expires_at < now_naive_utc:
                 return jsonify({"ok": False, "error": "token_expired"}), 401
 
-        tg_user_id = str((tg_user or {}).get('id') or t.telegram_user_id or '')
-        if str(tg_user_id) != str(t.telegram_user_id):
+        tg_user_id = str((tg_user or {}).get('id') or '')
+        if not tg_user_id or tg_user_id != str(t.telegram_user_id):
             return jsonify({"ok": False, "error": "telegram_user_mismatch"}), 401
 
         sess = BotSession.query.filter_by(
@@ -384,10 +441,22 @@ def create_app():
             telegram_user_id=str(sess.telegram_user_id),
         )
         if redeem_status == "not_found":
-            return jsonify({"ok": False, "error": "talon_not_found"}), 404
+            _send_telegram_message(str(t.telegram_user_id), f"❌ Талон {code} не найден")
+            return jsonify({"ok": False, "error": "talon_not_found", "code": code}), 404
 
         if redeem_status == "expired":
-            return jsonify({"ok": False, "error": "expired"}), 409
+            msg = (
+                f"❌ Талон №{talon.serial_number or code} недействителен\n"
+                f"Срок действия: {talon.valid_from.strftime('%d.%m.%Y') if talon.valid_from else '—'} — {talon.valid_to.strftime('%d.%m.%Y') if talon.valid_to else '—'}"
+            )
+            _send_telegram_message(str(t.telegram_user_id), msg)
+            return jsonify({
+                "ok": False,
+                "error": "expired",
+                "serial": talon.serial_number,
+                "valid_from": talon.valid_from.isoformat() if talon.valid_from else None,
+                "valid_to": talon.valid_to.isoformat() if talon.valid_to else None,
+            }), 409
 
         if redeem_status == "already_used":
             last = (
@@ -396,15 +465,27 @@ def create_app():
                 .order_by(TalonRedemption.used_at.desc())
                 .first()
             )
+            used_dt = last.used_at if last and last.used_at else talon.used_at
+            used_agzs_name = last.agzs.name if last and last.agzs else talon.used_agzs.name if talon.used_agzs else None
+            used_text = format_kz(used_dt) if used_dt else '—'
+            msg = (
+                f"❌ Талон №{talon.serial_number or code} уже использован\n"
+                f"Дата и время: {used_text}\n"
+                f"АГЗС: {used_agzs_name or '—'}"
+            )
+            _send_telegram_message(str(t.telegram_user_id), msg)
             return jsonify({
                 "ok": False,
                 "error": "already_used",
-                "used_at": last.used_at.isoformat() if last and last.used_at else talon.used_at.isoformat() if talon.used_at else None,
-                "agzs": last.agzs.name if last and last.agzs else talon.used_agzs.name if talon.used_agzs else None,
+                "serial": talon.serial_number,
+                "used_at": used_dt.isoformat() if used_dt else None,
+                "used_at_text": used_text,
+                "agzs": used_agzs_name,
             }), 409
 
         if redeem_status != "redeemed":
-            return jsonify({"ok": False, "error": "not_active"}), 409
+            _send_telegram_message(str(t.telegram_user_id), f"❌ Талон №{talon.serial_number or code} недоступен для использования")
+            return jsonify({"ok": False, "error": "not_active", "serial": talon.serial_number}), 409
 
         red = TalonRedemption(
             talon_id=talon.id,
@@ -418,30 +499,19 @@ def create_app():
         log_audit('telegram_scan_success', f'Талон {talon.serial_number} использован через Telegram WebApp', 'talon', talon.id)
         db.session.commit()
 
-        price = 0.0
-        if talon.contract and talon.contract.price_per_liter is not None:
-            price = float(talon.contract.price_per_liter or 0)
-        amount = float(talon.liters or 0) * price
-
-        bot_token = os.getenv("BOT_TOKEN", "").strip()
-        if bot_token and t.telegram_user_id:
-            status_text = (
-                f"✅ Талон принят\n"
-                f"Талон: №{talon.serial_number or '—'}\n"
-                f"Код: {talon.code or code}\n"
-                f"Время: {format_kz(used_time)}\n"
-                f"АГЗС: {sess.agzs.name if sess.agzs else '—'}\n"
-                f"Товар: {talon.product_name or '—'}\n"
-                f"Литры: {float(talon.liters or 0):.2f} л\n"
-                f"Сумма: {amount:,.2f} ₸".replace(",", " ")
-            )
-            try:
-                payload = _json.dumps({"chat_id": str(t.telegram_user_id), "text": status_text}).encode("utf-8")
-                req = Request(f"https://api.telegram.org/bot{bot_token}/sendMessage", data=payload, headers={"Content-Type": "application/json"})
-                with urlopen(req, timeout=10) as _resp:
-                    _resp.read()
-            except Exception:
-                app.logger.exception("Failed to send scan result to Telegram chat")
+        amount = 0.0
+        try:
+            amount = float(getattr(talon.contract, "price_per_liter", 0) or 0) * float(getattr(talon, "liters", 0) or 0)
+        except Exception:
+            amount = 0.0
+        success_msg = (
+            f"✅ Талон №{getattr(talon, 'serial_number', code) or code} принят\n"
+            f"Время: {format_kz(used_time)}\n"
+            f"АГЗС: {sess.agzs.name if sess.agzs else '—'}\n"
+            f"Объем: {float(getattr(talon, 'liters', 0) or 0):.2f} л\n"
+            f"Сумма: {amount:.2f} ₸"
+        )
+        _send_telegram_message(str(t.telegram_user_id), success_msg)
 
         return jsonify({
             "ok": True,
@@ -451,6 +521,7 @@ def create_app():
             "valid_from": str(getattr(talon, "valid_from", "")),
             "valid_to": str(getattr(talon, "valid_to", "")),
             "agzs": sess.agzs.name if sess.agzs else None,
+            "used_at_text": format_kz(used_time),
             "amount": amount,
         })
 

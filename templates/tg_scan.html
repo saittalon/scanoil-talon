@@ -109,6 +109,14 @@
     canvas {
       display: none;
     }
+
+    /* Прозрачный слой для первого касания, чтобы Telegram разрешил звук */
+    #tapUnlock {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      background: transparent;
+    }
   </style>
 </head>
 <body>
@@ -124,8 +132,11 @@
       <div id="resultText" class="text"></div>
       <div id="resultSub" class="sub"></div>
     </div>
+
+    <div id="tapUnlock"></div>
   </div>
 
+  <!-- Если успех/ошибка перепутаны, просто поменяй эти два файла местами -->
   <audio id="okAudio" src="{{ url_for('static', filename='scan.wav') }}" preload="auto"></audio>
   <audio id="errAudio" src="{{ url_for('static', filename='error.wav') }}" preload="auto"></audio>
 
@@ -143,6 +154,7 @@
     const resultSubEl = document.getElementById("resultSub");
     const okAudio = document.getElementById("okAudio");
     const errAudio = document.getElementById("errAudio");
+    const tapUnlock = document.getElementById("tapUnlock");
 
     let stream = null;
     let detector = null;
@@ -179,40 +191,49 @@
     }
 
     async function unlockAudio() {
-      if (audioUnlocked) return;
-      audioUnlocked = true;
+      if (audioUnlocked) return true;
 
       try {
         okAudio.load();
-        okAudio.volume = 1;
+        errAudio.load();
+
         okAudio.muted = false;
-        const p1 = okAudio.play();
-        if (p1) await p1.catch(() => {});
+        errAudio.muted = false;
+        okAudio.volume = 1;
+        errAudio.volume = 1;
+
+        let p1 = okAudio.play();
+        if (p1) await p1;
         okAudio.pause();
         okAudio.currentTime = 0;
-      } catch (e) {}
 
-      try {
-        errAudio.load();
-        errAudio.volume = 1;
-        errAudio.muted = false;
-        const p2 = errAudio.play();
-        if (p2) await p2.catch(() => {});
+        let p2 = errAudio.play();
+        if (p2) await p2;
         errAudio.pause();
         errAudio.currentTime = 0;
-      } catch (e) {}
+
+        audioUnlocked = true;
+        return true;
+      } catch (e) {
+        audioUnlocked = false;
+        return false;
+      }
     }
 
-    function playAudio(el) {
+    async function playAudio(el) {
       try {
+        if (!audioUnlocked) {
+          const ok = await unlockAudio();
+          if (!ok) return;
+        }
+
         el.pause();
         el.currentTime = 0;
-        el.volume = 1;
         el.muted = false;
+        el.volume = 1;
+
         const p = el.play();
-        if (p && typeof p.catch === "function") {
-          p.catch(() => {});
-        }
+        if (p) await p;
       } catch (e) {}
     }
 
@@ -246,7 +267,7 @@
           if (tg) tg.close();
           else window.close();
         } catch (e) {}
-      }, 1700);
+      }, 2500);
     }
 
     function normalizeCode(raw) {
@@ -358,10 +379,8 @@
       }
     }
 
-    async function start() {
+    async function startCamera() {
       try {
-        await unlockAudio();
-
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: "environment" }
@@ -385,17 +404,22 @@
       }
     }
 
-    document.addEventListener("click", async () => {
-      await unlockAudio();
-    }, { once: true });
+    async function firstGestureInit() {
+      try {
+        await unlockAudio();
+      } catch (e) {}
 
-    document.addEventListener("touchstart", async () => {
-      await unlockAudio();
-    }, { once: true });
+      try {
+        tapUnlock.style.display = "none";
+      } catch (e) {}
+    }
+
+    tapUnlock.addEventListener("touchstart", firstGestureInit, { once: true });
+    tapUnlock.addEventListener("touchend", firstGestureInit, { once: true });
+    tapUnlock.addEventListener("click", firstGestureInit, { once: true });
 
     window.addEventListener("load", async () => {
-      await unlockAudio();
-      start();
+      startCamera();
     });
 
     window.addEventListener("beforeunload", () => {

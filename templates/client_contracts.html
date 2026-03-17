@@ -155,7 +155,7 @@
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
           <div>
             <h6 class="mb-2">Заявки на изменение остатка</h6>
-            <div class="client-meta">История подтверждений по выбранному договору{% if all_balance_requests %} • всего заявок: {{ all_balance_requests|length }}{% endif %}</div>
+            <div class="client-meta">Ниже показывается история заявок по выбранному договору</div>
           </div>
         </div>
         {% if balance_requests %}
@@ -163,8 +163,8 @@
           {% for r in balance_requests %}
             <div class="file-row d-flex justify-content-between align-items-center gap-3">
               <div>
-                <div class="fw-semibold">{{ r.old_liters or 0 }} л → {{ r.requested_liters or 0 }} л</div>
-                <div class="client-meta mt-1">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }} • {{ r.requested_by.username if r.requested_by else '—' }} • {{ r.status }}</div>
+                <div class="fw-semibold">{% set delta = (r.requested_liters or 0) - (r.old_liters or 0) %}{% set delta_sign = "+" if delta >= 0 else "" %}Изменение: {{ delta_sign }}{{ "%.2f"|format(delta) }} л</div>
+                <div class="client-meta mt-1">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }} • {{ r.requested_by.username if r.requested_by else '—' }} • {{ r.status }} • Было: {{ '%.2f'|format(r.old_liters or 0) }} л • Станет: {{ '%.2f'|format(r.requested_liters or 0) }} л</div>
                 {% if r.comment %}<div class="client-meta mt-1">{{ r.comment }}</div>{% endif %}
               </div>
               <div class="d-flex gap-2 flex-wrap">
@@ -184,43 +184,6 @@
           </div>
         {% else %}
           <div class="client-meta">По выбранному договору заявок пока нет.</div>
-        {% endif %}
-      </div>
-
-      <div class="info-card mt-4">
-        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-          <div>
-            <h6 class="mb-2">Все заявки клиента</h6>
-            <div class="client-meta">Показываются последние заявки, даже если они созданы по другому договору</div>
-          </div>
-        </div>
-        {% if all_balance_requests %}
-          <div class="side-list">
-          {% for r in all_balance_requests %}
-            <div class="file-row d-flex justify-content-between align-items-center gap-3">
-              <div>
-                <div class="fw-semibold">{{ r.old_liters or 0 }} л → {{ r.requested_liters or 0 }} л</div>
-                <div class="client-meta mt-1">Договор: {{ r.contract.number if r.contract else '—' }} • {{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</div>
-                <div class="client-meta mt-1">{{ r.requested_by.username if r.requested_by else '—' }} • {{ r.status }}</div>
-                {% if r.comment %}<div class="client-meta mt-1">{{ r.comment }}</div>{% endif %}
-              </div>
-              <div class="d-flex gap-2 flex-wrap">
-                {% if r.status == 'pending' and current_role in ["director","zamdirector","deputy_director"] %}
-                  <form method="post" action="{{ url_for('clients.approve_balance_request', request_id=r.id) }}">
-                    <button class="btn btn-outline-success btn-sm" type="submit">Подтвердить</button>
-                  </form>
-                  <form method="post" action="{{ url_for('clients.reject_balance_request', request_id=r.id) }}">
-                    <button class="btn btn-outline-danger btn-sm" type="submit">Отклонить</button>
-                  </form>
-                {% elif r.approved_by %}
-                  <div class="client-meta">{{ r.approved_by.username }}</div>
-                {% endif %}
-              </div>
-            </div>
-          {% endfor %}
-          </div>
-        {% else %}
-          <div class="client-meta">Заявок пока нет.</div>
         {% endif %}
       </div>
 
@@ -259,7 +222,8 @@
                   </div>
                   <div class="col-12">
                     <div class="info-card">
-                      <div class="client-meta mb-2">Быстрые кнопки пополнения</div>
+                      <div class="client-meta mb-2">Текущий остаток: {{ ('%.2f'|format(balance.liters_left)) if balance else '0.00' }} л</div>
+                      {% if current_role in ["director","zamdirector","deputy_director"] %}
                       <div class="liter-badges mb-3">
                         {% for add in [50,100,250,500,1000,5000,10000] %}
                           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addLiters({{ add }})">+{{ add }} л</button>
@@ -267,14 +231,19 @@
                       </div>
                       <label class="form-label">Новый остаток, л</label>
                       <input class="form-control" id="litersInput" name="liters_left" value="{{ balance.liters_left if balance else 0 }}">
+                      {% else %}
+                      <label class="form-label">Изменить остаток на, л</label>
+                      <input class="form-control" id="litersDeltaInput" name="liters_delta" value="" placeholder="Например: 500 или -100">
+                      <div class="client-meta mt-2">Исполнитель отправляет только заявку. Пока директор или замдиректор не подтвердит её, создать талоны по этому договору нельзя.</div>
+                      {% endif %}
                       <label class="form-label mt-3">Комментарий</label>
-                      <input class="form-control" name="comment" placeholder="Например: исправление номинала / пополнение остатка">
+                      <input class="form-control" name="comment" placeholder="Например: пополнение остатка на 500 л">
                     </div>
                   </div>
                 </div>
               </div>
               <div class="modal-footer">
-                <button class="btn btn-brand">{% if current_role in ["director","zamdirector","deputy_director"] %}Сохранить остаток{% else %}Отправить на подтверждение{% endif %}</button>
+                <button class="btn btn-brand">{% if current_role in ["director","zamdirector","deputy_director"] %}Сохранить остаток{% else %}Отправить заявку{% endif %}</button>
                 <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отменить</button>
               </div>
             </form>

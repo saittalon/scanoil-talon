@@ -203,9 +203,24 @@
         errAudio.muted = false;
         okAudio.volume = 1;
         errAudio.volume = 1;
-
         okAudio.load();
         errAudio.load();
+
+        const prime = async (el) => {
+          try {
+            el.pause();
+            el.currentTime = 0;
+            const playPromise = el.play();
+            if (playPromise && typeof playPromise.then === "function") {
+              await playPromise;
+            }
+            el.pause();
+            el.currentTime = 0;
+          } catch (e) {}
+        };
+
+        await prime(okAudio);
+        await prime(errAudio);
 
         audioUnlocked = true;
         return true;
@@ -406,6 +421,10 @@
       try {
         tapUnlock.style.display = "none";
       } catch (e) {}
+
+      try {
+        await startCamera();
+      } catch (e) {}
     }
 
     tapUnlock.addEventListener("touchstart", firstGestureInit, { once: true });
@@ -413,7 +432,7 @@
     tapUnlock.addEventListener("click", firstGestureInit, { once: true });
 
     window.addEventListener("load", async () => {
-      startCamera();
+      setStatus("Нажмите на экран один раз, чтобы включить звук и камеру");
     });
 
     window.addEventListener("beforeunload", () => {

@@ -110,7 +110,6 @@
       display: none;
     }
 
-    /* Прозрачный слой для первого касания, чтобы Telegram разрешил звук */
     #tapUnlock {
       position: fixed;
       inset: 0;
@@ -136,9 +135,15 @@
     <div id="tapUnlock"></div>
   </div>
 
-  <!-- Если успех/ошибка перепутаны, просто поменяй эти два файла местами -->
-  <audio id="okAudio" src="{{ url_for('static', filename='scan.wav') }}" preload="auto"></audio>
-  <audio id="errAudio" src="{{ url_for('static', filename='error.wav') }}" preload="auto"></audio>
+  <!-- УСПЕХ -->
+  <audio id="okAudio" preload="auto">
+    <source src="{{ url_for('static', filename='success.wav') }}" type="audio/wav">
+  </audio>
+
+  <!-- ОШИБКА -->
+  <audio id="errAudio" preload="auto">
+    <source src="{{ url_for('static', filename='error.wav') }}" type="audio/wav">
+  </audio>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
@@ -194,46 +199,32 @@
       if (audioUnlocked) return true;
 
       try {
-        okAudio.load();
-        errAudio.load();
-
         okAudio.muted = false;
         errAudio.muted = false;
         okAudio.volume = 1;
         errAudio.volume = 1;
 
-        let p1 = okAudio.play();
-        if (p1) await p1;
-        okAudio.pause();
-        okAudio.currentTime = 0;
-
-        let p2 = errAudio.play();
-        if (p2) await p2;
-        errAudio.pause();
-        errAudio.currentTime = 0;
+        okAudio.load();
+        errAudio.load();
 
         audioUnlocked = true;
         return true;
       } catch (e) {
-        audioUnlocked = false;
         return false;
       }
     }
 
-    async function playAudio(el) {
+    function playAudio(el) {
       try {
-        if (!audioUnlocked) {
-          const ok = await unlockAudio();
-          if (!ok) return;
-        }
-
         el.pause();
         el.currentTime = 0;
         el.muted = false;
         el.volume = 1;
 
         const p = el.play();
-        if (p) await p;
+        if (p && typeof p.catch === "function") {
+          p.catch(() => {});
+        }
       } catch (e) {}
     }
 
@@ -259,8 +250,11 @@
       resultTextEl.textContent = text;
       resultSubEl.textContent = sub || "";
 
-      if (kind === "ok") playOk();
-      else playErr();
+      if (kind === "ok") {
+        playOk();
+      } else {
+        playErr();
+      }
 
       setTimeout(() => {
         try {

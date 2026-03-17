@@ -110,12 +110,6 @@
       display: none;
     }
 
-    #tapUnlock {
-      position: fixed;
-      inset: 0;
-      z-index: 30;
-      background: transparent;
-    }
   </style>
 </head>
 <body>
@@ -132,12 +126,11 @@
       <div id="resultSub" class="sub"></div>
     </div>
 
-    <div id="tapUnlock"></div>
   </div>
 
   <!-- УСПЕХ -->
   <audio id="okAudio" preload="auto">
-    <source src="{{ url_for('static', filename='success.wav') }}" type="audio/wav">
+    <source src="{{ url_for('static', filename='scan.wav') }}" type="audio/wav">
   </audio>
 
   <!-- ОШИБКА -->
@@ -159,7 +152,6 @@
     const resultSubEl = document.getElementById("resultSub");
     const okAudio = document.getElementById("okAudio");
     const errAudio = document.getElementById("errAudio");
-    const tapUnlock = document.getElementById("tapUnlock");
 
     let stream = null;
     let detector = null;
@@ -167,7 +159,6 @@
     let busy = false;
     let lastCode = "";
     let lastAt = 0;
-    let audioUnlocked = false;
 
     if (tg) {
       tg.ready();
@@ -196,8 +187,6 @@
     }
 
     async function unlockAudio() {
-      if (audioUnlocked) return true;
-
       try {
         okAudio.muted = false;
         errAudio.muted = false;
@@ -205,28 +194,7 @@
         errAudio.volume = 1;
         okAudio.load();
         errAudio.load();
-
-        const prime = async (el) => {
-          try {
-            el.pause();
-            el.currentTime = 0;
-            const playPromise = el.play();
-            if (playPromise && typeof playPromise.then === "function") {
-              await playPromise;
-            }
-            el.pause();
-            el.currentTime = 0;
-          } catch (e) {}
-        };
-
-        await prime(okAudio);
-        await prime(errAudio);
-
-        audioUnlocked = true;
-        return true;
-      } catch (e) {
-        return false;
-      }
+      } catch (e) {}
     }
 
     function playAudio(el) {
@@ -235,10 +203,15 @@
         el.currentTime = 0;
         el.muted = false;
         el.volume = 1;
-
         const p = el.play();
         if (p && typeof p.catch === "function") {
-          p.catch(() => {});
+          p.catch(() => {
+            try {
+              document.body.addEventListener('click', () => {
+                try { el.currentTime = 0; el.play().catch(() => {}); } catch (e) {}
+              }, { once: true });
+            } catch (e) {}
+          });
         }
       } catch (e) {}
     }
@@ -413,26 +386,10 @@
       }
     }
 
-    async function firstGestureInit() {
-      try {
-        await unlockAudio();
-      } catch (e) {}
-
-      try {
-        tapUnlock.style.display = "none";
-      } catch (e) {}
-
-      try {
-        await startCamera();
-      } catch (e) {}
-    }
-
-    tapUnlock.addEventListener("touchstart", firstGestureInit, { once: true });
-    tapUnlock.addEventListener("touchend", firstGestureInit, { once: true });
-    tapUnlock.addEventListener("click", firstGestureInit, { once: true });
-
     window.addEventListener("load", async () => {
-      setStatus("Нажмите на экран один раз, чтобы включить звук и камеру");
+      await unlockAudio();
+
+      startCamera();
     });
 
     window.addEventListener("beforeunload", () => {

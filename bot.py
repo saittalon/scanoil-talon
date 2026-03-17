@@ -59,7 +59,6 @@ def _main_keyboard(scan_url: str | None = None):
     else:
         rows.append([KeyboardButton("📷 СКАНИРОВАТЬ")])
 
-    rows.append([KeyboardButton("⌨️ ВВЕСТИ КОД")])
     rows.append([KeyboardButton("📋 МЕНЮ")])
     rows.append([KeyboardButton("🔴 ЗАКРЫТЬ СМЕНУ")])
     rows.append([KeyboardButton("🚪 ВЫЙТИ")])
@@ -71,6 +70,106 @@ def _main_keyboard(scan_url: str | None = None):
         is_persistent=True,
     )
 
+
+
+
+def _fmt_dt(value):
+    dt = to_kz(value)
+    return dt.strftime("%d.%m.%Y %H:%M") if dt else "—"
+
+
+def _fmt_date_str(value):
+    if not value:
+        return "—"
+    text = str(value)
+    parts = text.split("-")
+    if len(parts) == 3:
+        return f"{parts[2]}.{parts[1]}.{parts[0]}"
+    return text
+
+
+def _build_scan_result_message(payload: dict) -> str:
+    status = (payload or {}).get("status")
+    code = payload.get("code") or "—"
+    serial = payload.get("serial") or code
+    agzs = payload.get("agzs") or "—"
+
+    if status == "accepted":
+        liters = payload.get("liters")
+        liters_text = f"{float(liters):g} л" if liters not in (None, "") else "—"
+        product = payload.get("product") or "—"
+        used_at = _fmt_dt(payload.get("used_at"))
+        return (
+            "✅ Талон принят\n"
+            f"Талон: {serial}\n"
+            f"Код: {code}\n"
+            f"Время: {used_at}\n"
+            f"АГЗС: {agzs}\n"
+            f"Топливо: {product}\n"
+            f"Объем: {liters_text}"
+        )
+
+    if status == "already_used":
+        used_at = _fmt_dt(payload.get("used_at"))
+        return (
+            "❌ Талон уже использован\n"
+            f"Код: {code}\n"
+            f"Дата и время: {used_at}\n"
+            f"АГЗС: {agzs}"
+        )
+
+    if status == "expired":
+        valid_to = _fmt_date_str(payload.get("valid_to"))
+        return (
+            "❌ Срок действия талона истек\n"
+            f"Код: {code}\n"
+            f"Действовал до: {valid_to}"
+        )
+
+    if status == "not_found":
+        return f"❌ Талон не найден\nКод: {code}"
+
+    if status == "session_expired":
+        return "❌ Сессия сканера истекла. Откройте сканер заново."
+
+    if status == "invalid_telegram_context":
+        return "❌ Недействительная Telegram-сессия. Откройте сканер заново из бота."
+
+    if status == "camera_error":
+        return "❌ Не удалось открыть камеру. Проверьте доступ к камере и откройте сканер снова."
+
+    if status == "network_error":
+        return "❌ Ошибка сети при проверке талона. Попробуйте еще раз."
+
+    message = payload.get("message") or "Ошибка обработки талона"
+    return f"❌ {message}"
+
+
+async def webapp_scan_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    app = context.application.bot_data["flask_app"]
+    raw_data = None
+
+    if update.effective_message and getattr(update.effective_message, "web_app_data", None):
+        raw_data = update.effective_message.web_app_data.data
+    elif getattr(update, "message", None) and getattr(update.message, "web_app_data", None):
+        raw_data = update.message.web_app_data.data
+
+    if not raw_data:
+        return
+
+    try:
+        import json
+        payload = json.loads(raw_data)
+    except Exception:
+        payload = {"status": "error", "message": "Не удалось прочитать ответ сканера"}
+
+    with app.app_context():
+        scan_url = _make_scan_url(app, update.effective_user.id)
+
+    await update.effective_message.reply_text(
+        _build_scan_result_message(payload),
+        reply_markup=_main_keyboard(scan_url)
+    )
 
 def _only_digits(text):
     if not text:
@@ -649,6 +748,7 @@ def main():
     application.add_handler(MessageHandler(filters.Regex(r"^🟢 ОТКРЫТЬ СМЕНУ$"), open_shift))
     application.add_handler(MessageHandler(filters.Regex(r"^📋 МЕНЮ$"), show_menu))
     application.add_handler(MessageHandler(filters.Regex(r"^🔴 ЗАКРЫТЬ СМЕНУ$"), close_shift))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, webapp_scan_result))
     application.add_handler(MessageHandler(filters.Regex(r"^📷 СКАНИРОВАТЬ$"), scan_button))
     application.add_handler(MessageHandler(filters.Regex(r"^🚪 ВЫЙТИ$"), logout))
 

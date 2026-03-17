@@ -383,7 +383,11 @@ def create_app():
             return jsonify({"ok": False, "error": "talon_not_found"}), 404
 
         if redeem_status == "expired":
-            return jsonify({"ok": False, "error": "expired"}), 409
+            return jsonify({
+                "ok": False,
+                "error": "expired",
+                "valid_to": talon.valid_to.isoformat() if talon and talon.valid_to else None,
+            }), 409
 
         if redeem_status == "already_used":
             last = (
@@ -421,6 +425,7 @@ def create_app():
             "serial": getattr(talon, "serial_number", None),
             "valid_from": str(getattr(talon, "valid_from", "")),
             "valid_to": str(getattr(talon, "valid_to", "")),
+            "used_at": used_time.isoformat() if used_time else None,
             "agzs": sess.agzs.name if sess.agzs else None,
         })
 

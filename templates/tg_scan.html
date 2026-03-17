@@ -9,14 +9,14 @@
     #app{position:fixed;inset:0;background:#000}
     #video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
     .topbar{position:fixed;left:12px;right:12px;top:12px;z-index:5;padding:14px 18px;border-radius:22px;background:rgba(9,22,67,.88);border:1px solid rgba(255,255,255,.12);font-size:18px;font-weight:700;backdrop-filter:blur(10px)}
-    .hint{position:fixed;left:14px;right:14px;bottom:18px;z-index:5;padding:12px 16px;border-radius:18px;background:rgba(9,22,67,.78);border:1px solid rgba(255,255,255,.1);font-size:15px;line-height:1.35}
+    .frame{position:fixed;left:50%;top:50%;width:min(72vw,320px);height:min(72vw,320px);transform:translate(-50%,-42%);border:6px solid rgba(255,255,255,.94);border-radius:28px;box-shadow:0 0 0 9999px rgba(0,0,0,.35);z-index:4;pointer-events:none}
     .result{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:20;opacity:0;pointer-events:none;transition:opacity .18s ease}
     .result.show{opacity:1}
     .result.ok{background:rgba(19,153,81,.92)}
     .result.error{background:rgba(190,37,37,.92)}
     .icon{font-size:180px;line-height:1;margin-bottom:18px}
     .text{font-size:26px;font-weight:800;text-align:center;padding:0 24px}
-    .sub{font-size:17px;margin-top:10px;text-align:center;padding:0 24px;opacity:.95;max-width:720px}
+    .sub{font-size:17px;margin-top:10px;text-align:center;padding:0 24px;opacity:.95;max-width:720px;white-space:pre-line}
     canvas{display:none}
   </style>
 </head>
@@ -25,25 +25,28 @@
   <video id="video" playsinline autoplay muted></video>
   <canvas id="canvas"></canvas>
   <div id="status" class="topbar">📷 Наведите камеру на QR талона</div>
-  <div class="hint">Сканер запускается автоматически. После проверки появится галочка или крест, затем WebApp сам закроется.</div>
+  <div class="frame"></div>
   <div id="result" class="result">
     <div id="resultIcon" class="icon">✓</div>
     <div id="resultText" class="text"></div>
     <div id="resultSub" class="sub"></div>
   </div>
 </div>
+<audio id="okAudio" src="{{ url_for('static', filename='scan.wav') }}" preload="auto"></audio>
+<audio id="errAudio" src="{{ url_for('static', filename='error.wav') }}" preload="auto"></audio>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
 const TOKEN = {{ token|tojson }};
 const tg = window.Telegram && Telegram.WebApp ? Telegram.WebApp : null;
 const INIT_DATA = tg && tg.initData ? tg.initData : "";
 const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
 const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');
 const resultIconEl = document.getElementById('resultIcon');
 const resultTextEl = document.getElementById('resultText');
 const resultSubEl = document.getElementById('resultSub');
+const okAudio = document.getElementById('okAudio');
+const errAudio = document.getElementById('errAudio');
 let stream = null;
 let detector = null;
 let active = true;
@@ -66,6 +69,7 @@ function ensureAudio(){
     if (Ctx) audioCtx = new Ctx();
   }
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  try { okAudio.load(); errAudio.load(); } catch(e) {}
 }
 
 function beep(freq, duration){
@@ -87,10 +91,20 @@ function beep(freq, duration){
   } catch(e) {}
 }
 
-function playOk(){ beep(1046, 0.16); setTimeout(() => beep(1318, 0.18), 120); }
-function playErr(){ beep(220, 0.18); setTimeout(() => beep(160, 0.24), 150); }
+function playAudio(el){
+  try {
+    ensureAudio();
+    el.currentTime = 0;
+    const p = el.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch(e) {}
+}
+function playOk(){ playAudio(okAudio); beep(1046, 0.16); setTimeout(() => beep(1318, 0.18), 120); }
+function playErr(){ playAudio(errAudio); beep(220, 0.18); setTimeout(() => beep(160, 0.24), 150); }
 
 function showResult(kind, text, sub=''){
+  active = false;
+  try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch(e) {}
   if (kind === 'ok') {
     resultEl.className = 'result show ok';
     resultIconEl.textContent = '✓';
@@ -102,7 +116,7 @@ function showResult(kind, text, sub=''){
   }
   resultTextEl.textContent = text;
   resultSubEl.textContent = sub || '';
-  setTimeout(() => { try { if (tg) tg.close(); else window.close(); } catch(e) {} }, 1400);
+  setTimeout(() => { try { if (tg) tg.close(); else window.close(); } catch(e) {} }, 1700);
 }
 
 function normalizeCode(raw){
@@ -113,6 +127,12 @@ function normalizeCode(raw){
   } catch(e) {}
   const m = code.match(/(\d{6,})/);
   return m ? m[1] : code;
+}
+
+function fmtDate(s){
+  if (!s) return '—';
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
 }
 
 async function submitCode(rawCode){
@@ -128,17 +148,16 @@ async function submitCode(rawCode){
     const data = await res.json().catch(() => ({ok:false,error:'bad_json'}));
 
     if (res.ok && data.ok) {
-      showResult('ok', `Талон №${data.serial || code} принят`, `${data.used_at_text || ''}${data.agzs ? ' • ' + data.agzs : ''}`);
+      showResult('ok', `Талон №${data.serial || code} принят`, `${data.used_at_text || ''}${data.agzs ? '\nАГЗС: ' + data.agzs : ''}`);
       return;
     }
     if (data.error === 'already_used') {
-      showResult('error', `Талон №${data.serial || code} уже использован`, `${data.used_at_text || ''}${data.agzs ? ' • ' + data.agzs : ''}`);
+      showResult('error', `Талон №${data.serial || code} уже использован`, `${data.used_at_text || ''}${data.agzs ? '\nАГЗС: ' + data.agzs : ''}`);
       return;
     }
     if (data.error === 'expired') {
-      let sub = '';
-      if (data.valid_from || data.valid_to) sub = `Срок действия: ${data.valid_from || '—'} — ${data.valid_to || '—'}`;
-      showResult('error', `Срок действия талона истёк`, sub);
+      let sub = `Срок действия: ${fmtDate(data.valid_from)} — ${fmtDate(data.valid_to)}`;
+      showResult('error', 'Срок действия талона истёк', sub);
       return;
     }
     if (data.error === 'talon_not_found') {
@@ -166,10 +185,11 @@ async function scanOnce(){
         lastCode = code;
         lastAt = now;
         await submitCode(code);
+        return;
       }
     }
   } catch (e) {}
-  if (active && !busy) setTimeout(scanOnce, 250);
+  if (active && !busy) setTimeout(scanOnce, 180);
 }
 
 async function start(){
@@ -185,7 +205,7 @@ async function start(){
     }
     detector = new BarcodeDetector({ formats:['qr_code'] });
     setStatus('📷 Наведите камеру на QR талона');
-    scanOnce();
+    setTimeout(scanOnce, 200);
   } catch (e) {
     setStatus('❌ Не удалось запустить камеру');
     showResult('error', 'Не удалось открыть камеру');

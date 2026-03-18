@@ -86,11 +86,148 @@ def balance_set(client_id):
     contract = Contract.query.filter_by(client_id=client.id, id=contract_id).first()
     if not contract:
         flash("Договор не найден.", "danger")
-        return redirect(url_for("clients.client_contracts", client_id=client.id))
+        return redirect(url_for("clients.client_talons", client_id=client.id))
 
     if not contract_is_approved(contract):
         flash("Основной договор не подтвержден директором/замдиректора.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+
+    if addendum_file_id:
+        addendum = ContractFile.query.filter_by(id=addendum_file_id, contract_id=contract.id, kind="addendum").first()
+        if not addendum or addendum.approval_status != "approved":
+            flash("Выбранное доп. соглашение не подтверждено.", "danger")
+            return redirect(url_for("clients.client_talons", client_id=client.id))
+
+    bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id, product_name=product_name).first()
+    if bal is None:
+        bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id).first()
+
+    old_liters = float(bal.liters_left or 0) if bal else 0.0
+    delta_liters = liters_left - old_liters
+
+    if can_approve_balances():
+        if bal is None:
+            bal = Balance(
+                client_id=client.id,
+                contract_id=contract_id,
+                product_name=product_name
+            )
+            db.session.add(bal)
+
+        bal.product_name = product_name
+        bal.liters_left = liters_left
+        bal.balance_control = balance_control
+        bal.updated_at = datetime.utcnow()
+
+        log_audit(
+            "balance_set",
+            f"{current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}: "
+            f"{old_liters:.2f} -> {liters_left:.2f}",
+            "client",
+            client.id
+        )
+        db.session.commit()
+
+        notify_event(
+            "Обновлен остаток",
+            f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}"
+        )
+        flash("Остаток обновлён.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+
+    existing_pending = (
+        BalanceChangeRequest.query
+        .filter_by(client_id=client.id, contract_id=contract_id, status="pending")
+        .order_by(BalanceChangeRequest.id.desc())
+        .first()
+    )
+
+    if existing_pending:
+        existing_pending.balance_id = bal.id if bal else None
+        existing_pending.product_name = product_name
+        existing_pending.old_liters = old_liters
+        existing_pending.requested_liters = liters_left
+        existing_pending.delta_liters = delta_liters
+        existing_pending.balance_control = balance_control
+        existing_pending.comment = comment
+        existing_pending.requested_by_user_id = current_user.id
+        existing_pending.created_at = datetime.utcnow()
+
+        log_audit(
+            "balance_request_update",
+            f"{current_user.username} обновил pending-заявку по договору #{contract_id} клиента {client.name}",
+            "client",
+            client.id
+        )
+        db.session.commit()
+        flash("Заявка уже существовала и была обновлена.", "success")
+        return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+
+    req = BalanceChangeRequest(
+        client_id=client.id,
+        contract_id=contract_id,
+        balance_id=bal.id if bal else None,
+        requested_by_user_id=current_user.id,
+        product_name=product_name,
+        old_liters=old_liters,
+        requested_liters=liters_left,
+        delta_liters=delta_liters,
+        balance_control=balance_control,
+        comment=comment,
+        status="pending",
+        created_at=datetime.utcnow(),
+    )
+    db.session.add(req)
+
+    log_audit(
+        "balance_request_create",
+        f"{current_user.username} отправил заявку на изменение остатка по договору #{contract_id} клиента {client.name}: "
+        f"{old_liters:.2f} -> {liters_left:.2f}",
+        "client",
+        client.id
+    )
+
+    db.session.commit()
+    flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
+    return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+
+
+@clients_bp.post("/clients/<int:client_id>/balance/set", endpoint="balance_set")
+@login_required
+def balance_set(client_id):
+    client = Client.query.get_or_404(client_id)
+
+    if not can_edit_balances():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.client_contracts", client_id=client.id))
+
+    contract_id_raw = (request.form.get("contract_id") or "").strip()
+    contract_id = int(contract_id_raw) if contract_id_raw.isdigit() else None
+    addendum_file_id_raw = (request.form.get("addendum_file_id") or "").strip()
+    addendum_file_id = int(addendum_file_id_raw) if addendum_file_id_raw.isdigit() else None
+
+    if contract_id is None:
+        flash("Не выбран договор.", "danger")
+        return redirect(url_for("clients.client_contracts", client_id=client.id))
+
+    liters_raw = (request.form.get("liters_left") or "").strip()
+    try:
+        liters_left = float((liters_raw or "0").replace(",", "."))
+    except ValueError:
+        liters_left = 0.0
+
+    balance_control = bool(request.form.get("balance_control"))
+    product_name = (request.form.get("product_name") or "ГАЗ").strip() or "ГАЗ"
+    comment = (request.form.get("comment") or "").strip() or None
+
+    contract = Contract.query.filter_by(client_id=client.id, id=contract_id).first()
+    if not contract:
+        flash("Договор не найден.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
+
+    if not contract_is_approved(contract):
+        flash("Основной договор не подтвержден директором/замдиректора.", "danger")
+        return redirect(url_for("clients.client_talons", client_id=client.id))
 
     if addendum_file_id:
         addendum = ContractFile.query.filter_by(
@@ -100,7 +237,7 @@ def balance_set(client_id):
         ).first()
         if not addendum or addendum.approval_status != "approved":
             flash("Выбранное доп. соглашение не подтверждено.", "danger")
-            return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+            return redirect(url_for("clients.client_talons", client_id=client.id))
 
     bal = Balance.query.filter_by(
         client_id=client.id,
@@ -129,7 +266,20 @@ def balance_set(client_id):
         bal.liters_left = liters_left
         bal.balance_control = balance_control
         bal.updated_at = datetime.utcnow()
+
+        log_audit(
+            "balance_set",
+            f"{current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}: "
+            f"{old_liters:.2f} -> {liters_left:.2f}",
+            "client",
+            client.id
+        )
         db.session.commit()
+
+        notify_event(
+            "Обновлен остаток",
+            f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}"
+        )
         flash("Остаток обновлён.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
@@ -145,12 +295,18 @@ def balance_set(client_id):
         existing_pending.product_name = product_name
         existing_pending.old_liters = old_liters
         existing_pending.requested_liters = liters_left
-        existing_pending.new_liters = liters_left
         existing_pending.delta_liters = delta_liters
         existing_pending.balance_control = balance_control
         existing_pending.comment = comment
         existing_pending.requested_by_user_id = current_user.id
         existing_pending.created_at = datetime.utcnow()
+
+        log_audit(
+            "balance_request_update",
+            f"{current_user.username} обновил pending-заявку по договору #{contract_id} клиента {client.name}",
+            "client",
+            client.id
+        )
         db.session.commit()
         flash("Заявка уже существовала и была обновлена.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
@@ -163,7 +319,6 @@ def balance_set(client_id):
         product_name=product_name,
         old_liters=old_liters,
         requested_liters=liters_left,
-        new_liters=liters_left,
         delta_liters=delta_liters,
         balance_control=balance_control,
         comment=comment,
@@ -171,9 +326,91 @@ def balance_set(client_id):
         created_at=datetime.utcnow(),
     )
     db.session.add(req)
+
+    log_audit(
+        "balance_request_create",
+        f"{current_user.username} отправил заявку на изменение остатка по договору #{contract_id} клиента {client.name}: "
+        f"{old_liters:.2f} -> {liters_left:.2f}",
+        "client",
+        client.id
+    )
+
     db.session.commit()
     flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+
+
+
+@clients_bp.post("/balance-requests/<int:request_id>/approve")
+@login_required
+def approve_balance_request(request_id):
+    if not can_approve_balances():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.list_clients"))
+
+    req = BalanceChangeRequest.query.get_or_404(request_id)
+    if req.status != "pending":
+        flash("Заявка уже обработана.", "warning")
+        return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
+
+    bal = None
+    if req.balance_id:
+        bal = Balance.query.get(req.balance_id)
+    if bal is None:
+        bal = Balance.query.filter_by(
+            client_id=req.client_id,
+            contract_id=req.contract_id,
+            product_name=req.product_name
+        ).first()
+    if bal is None:
+        bal = Balance.query.filter_by(
+            client_id=req.client_id,
+            contract_id=req.contract_id
+        ).first()
+    if bal is None:
+        bal = Balance(
+            client_id=req.client_id,
+            contract_id=req.contract_id,
+            product_name=req.product_name or "ГАЗ"
+        )
+        db.session.add(bal)
+
+    target_liters = req.new_liters if getattr(req, "new_liters", None) is not None else req.requested_liters
+    bal.product_name = req.product_name or bal.product_name or "ГАЗ"
+    bal.liters_left = float(target_liters or 0)
+    bal.balance_control = bool(req.balance_control)
+    bal.updated_at = datetime.utcnow()
+
+    req.balance = bal
+    req.approved_by_user_id = current_user.id
+    req.status = "approved"
+    req.decided_at = datetime.utcnow()
+
+    db.session.commit()
+    flash("Заявка подтверждена. Остаток обновлён.", "success")
+    return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
+
+
+@clients_bp.post("/balance-requests/<int:request_id>/reject")
+@login_required
+def reject_balance_request(request_id):
+    if not can_approve_balances():
+        flash("Недостаточно прав.", "danger")
+        return redirect(url_for("clients.list_clients"))
+
+    req = BalanceChangeRequest.query.get_or_404(request_id)
+    if req.status != "pending":
+        flash("Заявка уже обработана.", "warning")
+        return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
+
+    req.status = "rejected"
+    req.approved_by_user_id = current_user.id
+    req.decided_at = datetime.utcnow()
+
+    db.session.commit()
+    flash("Заявка отклонена.", "warning")
+    return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
+
 
 # ---------------- Клиенты ----------------
 @clients_bp.get("/clients")
@@ -1079,36 +1316,27 @@ def client_reports(client_id):
 
     if date_from:
         try:
-            df_dt = datetime.strptime(date_from, "%Y-%m-%d")
-            q = q.filter(Talon.created_at >= df_dt)
+            df = datetime.strptime(date_from, "%Y-%m-%d").date()
+            q = q.filter(Talon.valid_from >= df)
         except ValueError:
             date_from = ""
 
     if date_to:
         try:
-            dt_dt = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
-            q = q.filter(Talon.created_at < dt_dt)
+            dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+            q = q.filter(Talon.valid_to <= dt)
         except ValueError:
             date_to = ""
 
-    all_talons = q.order_by(Talon.created_at.desc(), Talon.id.desc()).all()
+    all_talons = q.order_by(Talon.id.desc()).all()
     balances = Balance.query.filter_by(client_id=client.id).order_by(Balance.updated_at.desc()).all()
     balance_liters = sum(float(b.liters_left or 0) for b in balances)
 
     active_count = used_count = expired_count = blocked_count = 0
     total_liters = used_liters = active_liters = expired_liters = blocked_liters = 0.0
-    total_sum = 0.0
-
-    detailed_rows = []
-    addendum_stats = {}
-
     for t in all_talons:
         liters = float(t.liters or 0)
-        price = float(t.contract.price_per_liter or 0) if t.contract and t.contract.price_per_liter is not None else 0.0
-        amount = liters * price
         total_liters += liters
-        total_sum += amount
-
         state = talon_status(t)
         if state == "used":
             used_count += 1
@@ -1123,59 +1351,13 @@ def client_reports(client_id):
             active_count += 1
             active_liters += liters
 
-        if t.addendum_file:
-            addendum_name = t.addendum_file.original_name or t.addendum_file.title or f"Доп. соглашение #{t.addendum_file.id}"
-        else:
-            addendum_name = "— без доп. соглашения —"
-
-        if addendum_name not in addendum_stats:
-            addendum_stats[addendum_name] = {
-                "name": addendum_name,
-                "talons_count": 0,
-                "total_liters": 0.0,
-                "remaining_liters": 0.0,
-                "used_liters": 0.0,
-                "total_sum": 0.0,
-            }
-
-        add_row = addendum_stats[addendum_name]
-        add_row["talons_count"] += 1
-        add_row["total_liters"] += liters
-        add_row["total_sum"] += amount
-        if state == "used":
-            add_row["used_liters"] += liters
-        else:
-            add_row["remaining_liters"] += liters
-
-        op_dt = t.used_at or t.created_at
-        station_name = t.used_agzs.name if getattr(t, "used_agzs", None) else ""
-        detailed_rows.append({
-            "date": op_dt.strftime("%d.%m.%Y") if op_dt else "",
-            "time": op_dt.strftime("%H:%M:%S") if op_dt else "",
-            "client": client.name,
-            "holder_name": t.holder_name or client.name,
-            "contract_number": t.contract.number if t.contract else "",
-            "addendum_name": addendum_name,
-            "product_name": t.product_name or "ГАЗ",
-            "nominal": liters,
-            "remaining": 0.0 if state == "used" else liters,
-            "written_off": liters if state == "used" else 0.0,
-            "status": talon_status_label(t),
-            "station": station_name,
-            "talon_code": t.code or "",
-            "price": price,
-            "amount": amount,
-            "serial_number": t.serial_number or "",
-        })
-
     page = request.args.get("page", 1, type=int)
     per_page = 100
-    total_count = len(detailed_rows)
+    total_count = len(all_talons)
     start_idx = max((page - 1) * per_page, 0)
     end_idx = start_idx + per_page
-    paged_rows = detailed_rows[start_idx:end_idx]
+    talons = all_talons[start_idx:end_idx]
     total_pages = max(1, (total_count + per_page - 1) // per_page)
-
     pagination = {
         "page": page,
         "per_page": per_page,
@@ -1187,25 +1369,11 @@ def client_reports(client_id):
         "next_num": page + 1,
     }
 
-    summary_by_client = [{
-        "client_name": client.name,
-        "talons_count": len(all_talons),
-        "total_liters": total_liters,
-        "active_liters": active_liters,
-        "used_liters": used_liters,
-        "expired_liters": expired_liters,
-        "blocked_liters": blocked_liters,
-        "total_sum": total_sum,
-    }]
-
     return render_template(
         "client_reports.html",
         client=client,
-        talons=all_talons,
+        talons=talons,
         balances=balances,
-        detailed_rows=paged_rows,
-        summary_by_client=summary_by_client,
-        addendum_summary=list(addendum_stats.values()),
         date_from=date_from,
         date_to=date_to,
         active_count=active_count,
@@ -1218,10 +1386,8 @@ def client_reports(client_id):
         expired_liters=expired_liters,
         blocked_liters=blocked_liters,
         balance_liters=balance_liters,
-        total_sum=total_sum,
         total_count=total_count,
         pagination=pagination,
         tabs=_client_tabs(client),
         active_tab="reports",
-        format_kz=format_kz,
     )

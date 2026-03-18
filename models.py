@@ -129,6 +129,7 @@ class BalanceChangeRequest(db.Model):
     product_name = db.Column(db.String(50), default="ГАЗ")
     old_liters = db.Column(db.Float, nullable=True)
     requested_liters = db.Column(db.Float, nullable=False)
+    new_liters = db.Column(db.Float, nullable=True)
     delta_liters = db.Column(db.Float, nullable=True)
     balance_control = db.Column(db.Boolean, default=True)
     comment = db.Column(db.String(500), nullable=True)

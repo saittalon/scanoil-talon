@@ -145,6 +145,7 @@ def balance_set(client_id):
         existing_pending.product_name = product_name
         existing_pending.old_liters = old_liters
         existing_pending.requested_liters = liters_left
+        existing_pending.new_liters = liters_left
         existing_pending.delta_liters = delta_liters
         existing_pending.balance_control = balance_control
         existing_pending.comment = comment

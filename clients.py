@@ -135,7 +135,7 @@ def balance_set(client_id):
         flash("Остаток обновлён.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
-    existing_pending = (
+        existing_pending = (
         BalanceChangeRequest.query
         .filter_by(client_id=client.id, contract_id=contract_id, status="pending")
         .order_by(BalanceChangeRequest.id.desc())
@@ -153,14 +153,14 @@ def balance_set(client_id):
         existing_pending.requested_by_user_id = current_user.id
         existing_pending.created_at = datetime.utcnow()
 
-        log_audit(
-            "balance_request_update",
-            f"{current_user.username} обновил pending-заявку по договору #{contract_id} клиента {client.name}",
-            "client",
-            client.id
-        )
         db.session.commit()
-        flash("Заявка уже существовала и была обновлена.", "success")
+
+        created_check = BalanceChangeRequest.query.get(existing_pending.id)
+        if created_check:
+            flash("Заявка уже существовала и была обновлена.", "success")
+        else:
+            flash("Не удалось обновить заявку.", "danger")
+
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
     req = BalanceChangeRequest(
@@ -178,17 +178,18 @@ def balance_set(client_id):
         created_at=datetime.utcnow(),
     )
     db.session.add(req)
+    db.session.flush()
 
-    log_audit(
-        "balance_request_create",
-        f"{current_user.username} отправил заявку на изменение остатка по договору #{contract_id} клиента {client.name}: "
-        f"{old_liters:.2f} -> {liters_left:.2f}",
-        "client",
-        client.id
-    )
+    new_request_id = req.id
 
     db.session.commit()
-    flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
+
+    created_check = BalanceChangeRequest.query.get(new_request_id)
+    if created_check:
+        flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
+    else:
+        flash("Заявка не сохранилась в базе.", "danger")
+
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
 # ---------------- Клиенты ----------------

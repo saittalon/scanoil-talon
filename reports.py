@@ -177,23 +177,25 @@ def _build_all_reports_data(talons):
 @login_required
 def client_report_excel(client_id: int):
     client = Client.query.get_or_404(client_id)
-    date_from = request.args.get('date_from', '').strip()
-    date_to = request.args.get('date_to', '').strip()
+    date_from = (request.args.get('date_from') or '').strip()
+    date_to = (request.args.get('date_to') or '').strip()
 
     q = Talon.query.filter_by(client_id=client.id)
     if date_from:
         try:
-            q = q.filter(Talon.valid_from >= pd.to_datetime(date_from).date())
+            start = pd.to_datetime(date_from).date()
+            q = q.filter(Talon.created_at >= datetime.combine(start, datetime.min.time()))
         except Exception:
-            pass
+            date_from = ''
     if date_to:
         try:
-            q = q.filter(Talon.valid_to <= pd.to_datetime(date_to).date())
+            end = pd.to_datetime(date_to).date()
+            q = q.filter(Talon.created_at <= datetime.combine(end, datetime.max.time()))
         except Exception:
-            pass
+            date_to = ''
 
-    talons = q.order_by(Talon.id.asc()).all()
-    balances = Balance.query.filter_by(client_id=client.id).all()
+    talons = q.order_by(Talon.created_at.desc(), Talon.id.desc()).all()
+    balances = Balance.query.filter_by(client_id=client.id).order_by(Balance.updated_at.desc()).all()
 
     total_count = len(talons)
     active_count = sum(1 for t in talons if t.effective_state == 'active')
@@ -210,6 +212,8 @@ def client_report_excel(client_id: int):
 
     detail_rows = _client_rows(talons, client)
     detail_rows = sorted(detail_rows, key=lambda r: ((r.get('Доп. соглашение') or '—'), str(r.get('№') or '')))
+
+    total_sum = sum(float(row.get('Стоимость') or 0) for row in detail_rows)
 
     addendum_summary = {}
     for row in detail_rows:
@@ -228,6 +232,25 @@ def client_report_excel(client_id: int):
         bucket['Списано литров'] += float(row.get('Списано') or 0)
         bucket['Сумма'] += float(row.get('Стоимость') or 0)
 
+    balance_rows = [{
+        'Договор': b.contract.number if b.contract else '—',
+        'Товар': b.product_name,
+        'Остаток': float(b.liters_left or 0),
+        'Контроль': 'Да' if b.balance_control else 'Нет',
+        'Обновлено': format_kz(b.updated_at, '%d.%m.%Y %H:%M') if b.updated_at else '',
+    } for b in balances]
+
+    summary_client_df = pd.DataFrame([{
+        'Клиент': client.name,
+        'Талонов': total_count,
+        'Всего литров': total_liters,
+        'Активные литры': active_liters,
+        'Использованные литры': used_liters,
+        'Просроченные литры': expired_liters,
+        'Заблокированные литры': blocked_liters,
+        'Сумма': total_sum,
+    }])
+
     summary_df = pd.DataFrame([
         {'Показатель': 'Клиент', 'Значение': client.name},
         {'Показатель': 'Период (от)', 'Значение': date_from or '—'},
@@ -243,29 +266,39 @@ def client_report_excel(client_id: int):
         {'Показатель': 'Просрочено литров', 'Значение': expired_liters},
         {'Показатель': 'Заблокировано литров', 'Значение': blocked_liters},
         {'Показатель': 'Осталось газа по договорам, л', 'Значение': balance_liters},
+        {'Показатель': 'Общая сумма', 'Значение': total_sum},
     ])
-    addendum_df = pd.DataFrame(list(addendum_summary.values()))
+    addendum_df = pd.DataFrame(sorted(addendum_summary.values(), key=lambda r: str(r.get('Доп. соглашение') or '')))
+    balance_df = pd.DataFrame(balance_rows)
     detail_df = pd.DataFrame(detail_rows)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         sheet_name = 'client_report'
-        summary_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=0)
+        summary_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=1)
 
-        addendum_start = len(summary_df) + 3
+        client_start = len(summary_df) + 5
+        summary_client_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=client_start)
+
+        addendum_start = client_start + len(summary_client_df) + 4
         addendum_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=addendum_start)
 
-        detail_start = addendum_start + len(addendum_df) + 4
+        balance_start = addendum_start + len(addendum_df) + 4
+        balance_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=balance_start)
+
+        detail_start = balance_start + len(balance_df) + 4
         detail_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=detail_start)
 
         ws = writer.sheets[sheet_name]
         ws['A1'] = 'Сводка по клиенту'
-        ws['A%d' % (addendum_start + 1)] = 'Сводка по доп. соглашениям'
-        ws['A%d' % (detail_start + 1)] = 'Детальный отчёт по талонам'
+        ws[f'A{client_start + 1}'] = 'Сводка по клиентам'
+        ws[f'A{addendum_start + 1}'] = 'Сводка по доп. соглашениям'
+        ws[f'A{balance_start + 1}'] = 'Остатки по договорам'
+        ws[f'A{detail_start + 1}'] = 'Детальный отчёт по талонам'
 
         widths = {
-            'A': 14, 'B': 20, 'C': 18, 'D': 16, 'E': 24, 'F': 14, 'G': 12, 'H': 12,
-            'I': 12, 'J': 12, 'K': 12, 'L': 16, 'M': 18, 'N': 14, 'O': 16, 'P': 20,
+            'A': 16, 'B': 20, 'C': 18, 'D': 16, 'E': 24, 'F': 14, 'G': 14, 'H': 14,
+            'I': 12, 'J': 12, 'K': 14, 'L': 18, 'M': 18, 'N': 14, 'O': 16, 'P': 20,
             'Q': 12, 'R': 14,
         }
         for col, width in widths.items():
@@ -273,7 +306,13 @@ def client_report_excel(client_id: int):
         ws.freeze_panes = f'A{detail_start + 2}'
 
     output.seek(0)
-    return send_file(output, as_attachment=True, download_name=f'report_{client.name}.xlsx'.replace(' ', '_'), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f'report_{client.name}.xlsx'.replace(' ', '_'),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
 
 
 @reports_bp.get('/reports/all.xlsx')

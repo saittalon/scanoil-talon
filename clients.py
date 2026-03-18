@@ -1095,15 +1095,15 @@ def client_reports(client_id):
 
     if date_from:
         try:
-            df = datetime.strptime(date_from, "%Y-%m-%d").date()
-            q = q.filter(Talon.valid_from >= df)
+            df_dt = datetime.strptime(date_from, "%Y-%m-%d")
+            q = q.filter(Talon.created_at >= df_dt)
         except ValueError:
             date_from = ""
 
     if date_to:
         try:
-            dt = datetime.strptime(date_to, "%Y-%m-%d").date()
-            q = q.filter(Talon.valid_to <= dt)
+            dt_dt = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+            q = q.filter(Talon.created_at < dt_dt)
         except ValueError:
             date_to = ""
 
@@ -1113,9 +1113,18 @@ def client_reports(client_id):
 
     active_count = used_count = expired_count = blocked_count = 0
     total_liters = used_liters = active_liters = expired_liters = blocked_liters = 0.0
+    total_sum = 0.0
+
+    detailed_rows = []
+    addendum_stats = {}
+
     for t in all_talons:
         liters = float(t.liters or 0)
+        price = float(t.contract.price_per_liter or 0) if t.contract and t.contract.price_per_liter is not None else 0.0
+        amount = liters * price
         total_liters += liters
+        total_sum += amount
+
         state = talon_status(t)
         if state == "used":
             used_count += 1
@@ -1130,13 +1139,60 @@ def client_reports(client_id):
             active_count += 1
             active_liters += liters
 
+        if t.addendum_file:
+            addendum_name = t.addendum_file.original_name or t.addendum_file.title or f"Доп. соглашение #{t.addendum_file.id}"
+        else:
+            addendum_name = "— без доп. соглашения —"
+
+        if addendum_name not in addendum_stats:
+            addendum_stats[addendum_name] = {
+                "name": addendum_name,
+                "talons_count": 0,
+                "total_liters": 0.0,
+                "remaining_liters": 0.0,
+                "written_off_liters": 0.0,
+                "total_sum": 0.0,
+            }
+
+        add_row = addendum_stats[addendum_name]
+        add_row["talons_count"] += 1
+        add_row["total_liters"] += liters
+        add_row["total_sum"] += amount
+        if state == "used":
+            add_row["written_off_liters"] += liters
+        else:
+            add_row["remaining_liters"] += liters
+
+        used_at_local = t.used_at
+        detailed_rows.append({
+            "client": client.name,
+            "holder_name": t.holder_name or client.name,
+            "contract_number": t.contract.number if t.contract else "",
+            "addendum_name": addendum_name,
+            "product_name": t.product_name or "ГАЗ",
+            "nominal": liters,
+            "remaining": 0.0 if state == "used" else liters,
+            "written_off": liters if state == "used" else 0.0,
+            "valid_from": str(t.valid_from) if t.valid_from else "",
+            "valid_to": str(t.valid_to) if t.valid_to else "",
+            "status": talon_status_label(t),
+            "used_date": used_at_local.strftime("%d.%m.%Y") if used_at_local else "",
+            "used_time": used_at_local.strftime("%H:%M:%S") if used_at_local else "",
+            "station": getattr(t, "redeemed_station_name", "") or "",
+            "talon_code": t.code or "",
+            "price": price,
+            "amount": amount,
+            "serial_number": t.serial_number or "",
+        })
+
     page = request.args.get("page", 1, type=int)
     per_page = 100
-    total_count = len(all_talons)
+    total_count = len(detailed_rows)
     start_idx = max((page - 1) * per_page, 0)
     end_idx = start_idx + per_page
-    talons = all_talons[start_idx:end_idx]
+    paged_rows = detailed_rows[start_idx:end_idx]
     total_pages = max(1, (total_count + per_page - 1) // per_page)
+
     pagination = {
         "page": page,
         "per_page": per_page,
@@ -1148,11 +1204,25 @@ def client_reports(client_id):
         "next_num": page + 1,
     }
 
+    summary_by_client = [{
+        "client_name": client.name,
+        "talons_count": len(all_talons),
+        "total_liters": total_liters,
+        "active_liters": active_liters,
+        "used_liters": used_liters,
+        "expired_liters": expired_liters,
+        "blocked_liters": blocked_liters,
+        "total_sum": total_sum,
+    }]
+
     return render_template(
         "client_reports.html",
         client=client,
-        talons=talons,
+        talons=all_talons,
         balances=balances,
+        detailed_rows=paged_rows,
+        summary_by_client=summary_by_client,
+        addendum_summary=list(addendum_stats.values()),
         date_from=date_from,
         date_to=date_to,
         active_count=active_count,
@@ -1165,6 +1235,7 @@ def client_reports(client_id):
         expired_liters=expired_liters,
         blocked_liters=blocked_liters,
         balance_liters=balance_liters,
+        total_sum=total_sum,
         total_count=total_count,
         pagination=pagination,
         tabs=_client_tabs(client),

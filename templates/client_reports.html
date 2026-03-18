@@ -2,7 +2,7 @@
 {% block content %}
 {% include "_client_header.html" %}
 {% set total_cost = total_sum or 0 %}
-{% set client_rows = summary_by_client or [] %}
+{% set client_rows = summary_by_client if summary_by_client is defined and summary_by_client else [{"client_name": client.name, "talons_count": total_count or 0, "total_liters": total_liters or 0, "active_liters": active_liters or 0, "used_liters": used_liters or 0, "expired_liters": expired_liters or 0, "blocked_liters": blocked_liters or 0, "total_sum": total_sum or 0}] %}
 {% set addendum_rows = addendum_summary or [] %}
 {% set rows = detailed_rows or [] %}
 

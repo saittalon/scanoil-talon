@@ -614,10 +614,9 @@ def client_talons(client_id):
     date_to = (request.args.get("date_to") or "").strip() or None
     status = (request.args.get("status") or "active").strip().lower()
 
-    q = Talon.query.options(
-        joinedload(Talon.contract),
-        joinedload(Talon.addendum_file),
-    ).filter_by(client_id=client.id)
+   q = Talon.query.options(
+    joinedload(Talon.contract),
+).filter_by(client_id=client.id)
 
     if date_from:
         try:

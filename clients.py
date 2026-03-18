@@ -86,26 +86,37 @@ def balance_set(client_id):
     contract = Contract.query.filter_by(client_id=client.id, id=contract_id).first()
     if not contract:
         flash("Договор не найден.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=client.id))
+        return redirect(url_for("clients.client_contracts", client_id=client.id))
 
     if not contract_is_approved(contract):
         flash("Основной договор не подтвержден директором/замдиректора.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=client.id))
+        return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
     if addendum_file_id:
-        addendum = ContractFile.query.filter_by(id=addendum_file_id, contract_id=contract.id, kind="addendum").first()
+        addendum = ContractFile.query.filter_by(
+            id=addendum_file_id,
+            contract_id=contract.id,
+            kind="addendum"
+        ).first()
         if not addendum or addendum.approval_status != "approved":
             flash("Выбранное доп. соглашение не подтверждено.", "danger")
-            return redirect(url_for("clients.client_talons", client_id=client.id))
+            return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
-    bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id, product_name=product_name).first()
+    bal = Balance.query.filter_by(
+        client_id=client.id,
+        contract_id=contract_id,
+        product_name=product_name
+    ).first()
     if bal is None:
-        bal = Balance.query.filter_by(client_id=client.id, contract_id=contract_id).first()
+        bal = Balance.query.filter_by(
+            client_id=client.id,
+            contract_id=contract_id
+        ).first()
 
     old_liters = float(bal.liters_left or 0) if bal else 0.0
     delta_liters = liters_left - old_liters
 
-       if can_approve_balances():
+    if can_approve_balances():
         if bal is None:
             bal = Balance(
                 client_id=client.id,
@@ -118,6 +129,7 @@ def balance_set(client_id):
         bal.liters_left = liters_left
         bal.balance_control = balance_control
         bal.updated_at = datetime.utcnow()
+
         db.session.commit()
         flash("Остаток обновлён.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
@@ -139,6 +151,7 @@ def balance_set(client_id):
         existing_pending.comment = comment
         existing_pending.requested_by_user_id = current_user.id
         existing_pending.created_at = datetime.utcnow()
+
         db.session.commit()
         flash("Заявка уже существовала и была обновлена.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
@@ -148,6 +161,7 @@ def balance_set(client_id):
         contract_id=contract_id,
         balance_id=bal.id if bal else None,
         requested_by_user_id=current_user.id,
+        approved_by_user_id=None,
         product_name=product_name,
         old_liters=old_liters,
         requested_liters=liters_left,
@@ -156,11 +170,14 @@ def balance_set(client_id):
         comment=comment,
         status="pending",
         created_at=datetime.utcnow(),
+        decided_at=None,
     )
     db.session.add(req)
     db.session.commit()
+
     flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
+
 
 # ---------------- Клиенты ----------------
 @clients_bp.get("/clients")

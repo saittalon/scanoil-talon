@@ -1182,82 +1182,156 @@ def client_reports(client_id):
     date_from = (request.args.get("date_from") or "").strip()
     date_to = (request.args.get("date_to") or "").strip()
 
-    q = Talon.query.filter_by(client_id=client.id)
+    start = None
+    end = None
 
     if date_from:
         try:
-            df = datetime.strptime(date_from, "%Y-%m-%d").date()
-            q = q.filter(Talon.valid_from >= df)
+            start = datetime.strptime(date_from, "%Y-%m-%d").date()
         except ValueError:
             date_from = ""
 
     if date_to:
         try:
-            dt = datetime.strptime(date_to, "%Y-%m-%d").date()
-            q = q.filter(Talon.valid_to <= dt)
+            end = datetime.strptime(date_to, "%Y-%m-%d").date()
         except ValueError:
             date_to = ""
 
-    all_talons = q.order_by(Talon.id.desc()).all()
+    def in_period(dt_value):
+        if dt_value is None:
+            return not start and not end
+        dt_date = dt_value.date() if hasattr(dt_value, "date") else dt_value
+        if start and dt_date < start:
+            return False
+        if end and dt_date > end:
+            return False
+        return True
+
+    def op_dt(t):
+        return t.used_at or t.created_at
+
+    all_client_talons = (
+        Talon.query
+        .filter_by(client_id=client.id)
+        .order_by(Talon.id.desc())
+        .all()
+    )
+
+    talons = [t for t in all_client_talons if in_period(op_dt(t))]
     balances = Balance.query.filter_by(client_id=client.id).order_by(Balance.updated_at.desc()).all()
     balance_liters = sum(float(b.liters_left or 0) for b in balances)
 
-    active_count = used_count = expired_count = blocked_count = 0
-    total_liters = used_liters = active_liters = expired_liters = blocked_liters = 0.0
-    for t in all_talons:
-        liters = float(t.liters or 0)
-        total_liters += liters
-        state = talon_status(t)
-        if state == "used":
-            used_count += 1
-            used_liters += liters
-        elif state == "expired":
-            expired_count += 1
-            expired_liters += liters
-        elif state == "blocked":
-            blocked_count += 1
-            blocked_liters += liters
-        else:
-            active_count += 1
-            active_liters += liters
+    total_count = len(talons)
+    active_count = sum(1 for t in talons if talon_status(t) == "active")
+    used_count = sum(1 for t in talons if talon_status(t) == "used")
+    expired_count = sum(1 for t in talons if talon_status(t) == "expired")
+    blocked_count = sum(1 for t in talons if talon_status(t) == "blocked")
 
-    page = request.args.get("page", 1, type=int)
-    per_page = 100
-    total_count = len(all_talons)
-    start_idx = max((page - 1) * per_page, 0)
-    end_idx = start_idx + per_page
-    talons = all_talons[start_idx:end_idx]
-    total_pages = max(1, (total_count + per_page - 1) // per_page)
-    pagination = {
-        "page": page,
-        "per_page": per_page,
-        "total": total_count,
-        "pages": total_pages,
-        "has_prev": page > 1,
-        "has_next": page < total_pages,
-        "prev_num": page - 1,
-        "next_num": page + 1,
-    }
+    total_liters = sum(float(t.liters or 0) for t in talons)
+    active_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "active")
+    used_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "used")
+    expired_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "expired")
+    blocked_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "blocked")
+
+    detailed_rows = []
+    total_sum = 0.0
+    addendum_buckets = {}
+
+    for t in talons:
+        contract = t.contract
+        price = float(contract.price_per_liter or 0) if (contract and contract.price_per_liter is not None) else 0.0
+        nominal = float(t.liters or 0)
+        state = talon_status(t)
+        remaining = 0.0 if state == "used" else nominal
+        written_off = nominal - remaining
+        amount = nominal * price
+        total_sum += amount
+
+        addendum_name = ""
+        if getattr(t, "addendum_file", None):
+            addendum_name = t.addendum_file.original_name or t.addendum_file.title or ""
+
+        operation_dt = op_dt(t)
+
+        detailed_rows.append({
+            "date": format_kz(operation_dt, "%d.%m.%Y") if operation_dt else "",
+            "time": format_kz(operation_dt, "%H:%M:%S") if operation_dt else "",
+            "client": client.name,
+            "holder_name": t.holder_name or client.name,
+            "contract_number": contract.number if contract else "",
+            "addendum_name": addendum_name,
+            "product_name": t.product_name or "ГАЗ",
+            "nominal": nominal,
+            "remaining": remaining,
+            "written_off": written_off,
+            "price": price,
+            "amount": amount,
+            "station": t.used_agzs.name if getattr(t, "used_agzs", None) else "",
+            "status": talon_status_label(t),
+        })
+
+        bucket_key = addendum_name or "— без доп. соглашения —"
+        bucket = addendum_buckets.setdefault(bucket_key, {
+            "name": bucket_key,
+            "talons_count": 0,
+            "total_liters": 0.0,
+            "remaining_liters": 0.0,
+            "used_liters": 0.0,
+            "total_sum": 0.0,
+        })
+        bucket["talons_count"] += 1
+        bucket["total_liters"] += nominal
+        bucket["remaining_liters"] += remaining
+        bucket["used_liters"] += written_off
+        bucket["total_sum"] += amount
+
+    detailed_rows = sorted(
+        detailed_rows,
+        key=lambda r: (
+            str(r.get("addendum_name") or ""),
+            str(r.get("contract_number") or ""),
+            str(r.get("date") or ""),
+            str(r.get("time") or "")
+        ),
+        reverse=True
+    )
+
+    summary_by_client = [{
+        "client_name": client.name,
+        "talons_count": total_count,
+        "total_liters": total_liters,
+        "active_liters": active_liters,
+        "used_liters": used_liters,
+        "expired_liters": expired_liters,
+        "blocked_liters": blocked_liters,
+        "total_sum": total_sum,
+    }]
+
+    addendum_summary = list(addendum_buckets.values())
 
     return render_template(
         "client_reports.html",
         client=client,
-        talons=talons,
         balances=balances,
+        summary_by_client=summary_by_client,
+        addendum_summary=addendum_summary,
+        detailed_rows=detailed_rows,
         date_from=date_from,
         date_to=date_to,
+        total_count=total_count,
         active_count=active_count,
         used_count=used_count,
         expired_count=expired_count,
         blocked_count=blocked_count,
         total_liters=total_liters,
-        used_liters=used_liters,
         active_liters=active_liters,
+        used_liters=used_liters,
         expired_liters=expired_liters,
         blocked_liters=blocked_liters,
         balance_liters=balance_liters,
-        total_count=total_count,
-        pagination=pagination,
+        total_sum=total_sum,
         tabs=_client_tabs(client),
         active_tab="reports",
+        format_kz=format_kz,
     )
+

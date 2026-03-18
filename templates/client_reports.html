@@ -1,12 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 {% include "_client_header.html" %}
-{% set total_cost = total_cost or 0 %}
+{% set total_cost = total_sum or 0 %}
+{% set client_rows = summary_by_client or [] %}
+{% set addendum_rows = addendum_summary or [] %}
+{% set rows = detailed_rows or [] %}
 
 <div class="page-hero">
   <div class="hero-kicker">Отчёт по клиенту</div>
   <div class="hero-title">Талоны, объём СУГ и статус использования</div>
-  <div class="hero-subtitle">Теперь отчёт по одному клиенту выглядит так же, как общий: сверху ключевые цифры, ниже остатки, сводки и полная детализация.</div>
+  <div class="hero-subtitle">Теперь отчёт по клиенту выглядит так же, как общий отчёт, только по одному выбранному клиенту.</div>
 </div>
 
 <div class="report-stat-grid mb-4">
@@ -23,14 +26,14 @@
 <div class="report-grid mb-4">
   <div class="card card-soft section-card">
     <div class="section-title">Фильтр периода</div>
-    <div class="section-subtitle">Фильтр работает так же, как в общем отчёте: по дате создания/операции талона.</div>
+    <div class="section-subtitle">Можно быстро посмотреть период и скачать Excel.</div>
     <form class="row g-3" method="get" action="{{ url_for('clients.client_reports', client_id=client.id) }}">
       <div class="col-md-4">
-        <label class="form-label">Период (от)</label>
+        <label class="form-label">Период действия (от)</label>
         <input class="form-control" type="date" name="date_from" value="{{ date_from or '' }}">
       </div>
       <div class="col-md-4">
-        <label class="form-label">Период (до)</label>
+        <label class="form-label">Период действия (до)</label>
         <input class="form-control" type="date" name="date_to" value="{{ date_to or '' }}">
       </div>
       <div class="col-md-4 d-flex align-items-end gap-2 flex-wrap">
@@ -74,6 +77,7 @@
     <div class="section-subtitle">Быстрая детализация по объёму газа.</div>
     <div class="table-shell"><div class="table-responsive"><table class="table table-sm align-middle mb-0">
       <tbody>
+        <tr><th>Клиентов в выборке</th><td>1</td></tr>
         <tr><th>Всего литров в талонах</th><td>{{ '%.2f'|format(total_liters) }} л</td></tr>
         <tr><th>Активные литры</th><td>{{ '%.2f'|format(active_liters) }} л</td></tr>
         <tr><th>Использованные литры</th><td>{{ '%.2f'|format(used_liters) }} л</td></tr>
@@ -87,23 +91,23 @@
 </div>
 
 <div class="card card-soft section-card mb-4">
-  <div class="section-title">Сводка по клиенту</div>
-  <div class="section-subtitle">Структура такая же, как в общем отчёте.</div>
+  <div class="section-title">Сводка по клиентам</div>
+  <div class="section-subtitle">Такой же детальный блок, как в общем отчёте, только по выбранному клиенту.</div>
   <div class="table-shell"><div class="table-responsive"><table class="table table-sm align-middle mb-0">
     <thead>
       <tr><th>Клиент</th><th>Талонов</th><th>Всего литров</th><th>Активные</th><th>Использованные</th><th>Просроченные</th><th>Заблокированные</th><th>Сумма</th></tr>
     </thead>
     <tbody>
-      {% for r in summary_rows %}
+      {% for r in client_rows %}
       <tr>
-        <td>{{ r['Клиент'] }}</td>
-        <td>{{ r['Талонов'] }}</td>
-        <td>{{ '%.2f'|format(r['Всего литров']) }} л</td>
-        <td>{{ '%.2f'|format(r['Активные литры']) }} л</td>
-        <td>{{ '%.2f'|format(r['Использованные литры']) }} л</td>
-        <td>{{ '%.2f'|format(r['Просроченные литры']) }} л</td>
-        <td>{{ '%.2f'|format(r['Заблокированные литры']) }} л</td>
-        <td>{{ '%.0f'|format(r['Сумма']) }} ₸</td>
+        <td>{{ r.client_name }}</td>
+        <td>{{ r.talons_count }}</td>
+        <td>{{ '%.2f'|format(r.total_liters) }} л</td>
+        <td>{{ '%.2f'|format(r.active_liters) }} л</td>
+        <td>{{ '%.2f'|format(r.used_liters) }} л</td>
+        <td>{{ '%.2f'|format(r.expired_liters) }} л</td>
+        <td>{{ '%.2f'|format(r.blocked_liters) }} л</td>
+        <td>{{ '%.0f'|format(r.total_sum) }} ₸</td>
       </tr>
       {% else %}
       <tr><td colspan="8" class="empty-state">Нет данных по клиенту за выбранный период.</td></tr>
@@ -114,7 +118,7 @@
 
 <div class="card card-soft section-card mb-4">
   <div class="section-title">Сводка по доп. соглашениям</div>
-  <div class="section-subtitle">Тот же блок, что и в Excel общего отчёта, только по текущему клиенту.</div>
+  <div class="section-subtitle">Такой же блок, как в общем Excel, только по текущему клиенту.</div>
   <div class="table-shell"><div class="table-responsive"><table class="table table-sm align-middle mb-0">
     <thead>
       <tr><th>Доп. соглашение</th><th>Талонов</th><th>Всего литров</th><th>Остаток литров</th><th>Списано литров</th><th>Сумма</th></tr>
@@ -122,12 +126,12 @@
     <tbody>
       {% for r in addendum_rows %}
       <tr>
-        <td>{{ r['Доп. соглашение'] }}</td>
-        <td>{{ r['Талонов'] }}</td>
-        <td>{{ '%.2f'|format(r['Всего литров']) }} л</td>
-        <td>{{ '%.2f'|format(r['Остаток литров']) }} л</td>
-        <td>{{ '%.2f'|format(r['Списано литров']) }} л</td>
-        <td>{{ '%.0f'|format(r['Сумма']) }} ₸</td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.talons_count }}</td>
+        <td>{{ '%.2f'|format(r.total_liters) }} л</td>
+        <td>{{ '%.2f'|format(r.remaining_liters) }} л</td>
+        <td>{{ '%.2f'|format(r.used_liters) }} л</td>
+        <td>{{ '%.0f'|format(r.total_sum) }} ₸</td>
       </tr>
       {% else %}
       <tr><td colspan="6" class="empty-state">Нет данных по доп. соглашениям за выбранный период.</td></tr>
@@ -148,20 +152,20 @@
     <tbody>
       {% for r in rows %}
       <tr>
-        <td>{{ r['Дата'] }}</td>
-        <td>{{ r['Время'] }}</td>
-        <td>{{ r['Клиент'] }}</td>
-        <td>{{ r['Владелец'] }}</td>
-        <td>{{ r['Договор'] }}</td>
-        <td>{{ r['Доп. соглашение'] }}</td>
-        <td>{{ r['Услуга'] }}</td>
-        <td>{{ '%.2f'|format(r['Количество']) }} л</td>
-        <td>{{ '%.2f'|format(r['Остаток']) }} л</td>
-        <td>{{ '%.2f'|format(r['Списано']) }} л</td>
-        <td>{{ '%.2f'|format(r['Цена']) }}</td>
-        <td><b>{{ '%.2f'|format(r['Стоимость']) }}</b></td>
-        <td>{{ r['АЗС'] }}</td>
-        <td>{{ r['Статус'] }}</td>
+        <td>{{ r.date }}</td>
+        <td>{{ r.time }}</td>
+        <td>{{ r.client }}</td>
+        <td>{{ r.holder_name }}</td>
+        <td>{{ r.contract_number }}</td>
+        <td>{{ r.addendum_name }}</td>
+        <td>{{ r.product_name }}</td>
+        <td>{{ '%.2f'|format(r.nominal) }} л</td>
+        <td>{{ '%.2f'|format(r.remaining) }} л</td>
+        <td>{{ '%.2f'|format(r.written_off) }} л</td>
+        <td>{{ '%.2f'|format(r.price) }}</td>
+        <td><b>{{ '%.2f'|format(r.amount) }}</b></td>
+        <td>{{ r.station }}</td>
+        <td>{{ r.status }}</td>
       </tr>
       {% else %}
       <tr><td colspan="14" class="empty-state">Нет талонов за выбранный период.</td></tr>

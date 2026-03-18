@@ -613,7 +613,14 @@ def client_talons(client_id):
     date_to = (request.args.get("date_to") or "").strip() or None
     status = (request.args.get("status") or "active").strip().lower()
 
-    q = Talon.query.filter_by(client_id=client.id)
+    q = (
+        Talon.query
+        .options(
+            joinedload(Talon.contract),
+            joinedload(Talon.addendum_file),
+        )
+        .filter_by(client_id=client.id)
+    )
 
     if date_from:
         try:
@@ -864,6 +871,13 @@ def client_talons_add(client_id):
 @clients_bp.post("/talons/<int:talon_id>/use")
 @login_required
 def talon_use(talon_id):
+    next_url = (request.form.get("next") or request.referrer or "").strip()
+
+    def _safe_back(default_endpoint, **values):
+        if next_url.startswith("/") and not next_url.startswith("//"):
+            return redirect(next_url)
+        return redirect(url_for(default_endpoint, **values))
+
     used_time = kz_now()
     redeem_status, t = redeem_talon_atomic(
         talon_id=talon_id,
@@ -877,15 +891,15 @@ def talon_use(talon_id):
 
     if redeem_status == "expired":
         flash("Срок действия талона истек", "danger")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
+        return _safe_back("clients.client_talons", client_id=t.client_id, status="expired")
 
     if redeem_status == "already_used":
         flash("Талон уже использован", "warning")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="used"))
+        return _safe_back("clients.client_talons", client_id=t.client_id, status="used")
 
     if redeem_status != "redeemed":
         flash("Талон недоступен для использования", "warning")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id))
+        return _safe_back("clients.client_talons", client_id=t.client_id)
 
     log_audit("use_talon", f"{current_user.username} использовал талон {t.serial_number}", "talon", t.id)
     db.session.commit()
@@ -896,13 +910,19 @@ def talon_use(talon_id):
         f"использован пользователем {current_user.username} в {format_kz(t.used_at)}"
     )
     flash("Талон использован", "success")
-    return redirect(url_for("clients.client_talons", client_id=t.client_id, status="used"))
+    return _safe_back("clients.client_talons", client_id=t.client_id, status="used")
 
 
 @clients_bp.post("/talons/<int:talon_id>/extend")
 @login_required
 def talon_extend(talon_id):
     t = Talon.query.get_or_404(talon_id)
+    next_url = (request.form.get("next") or request.referrer or "").strip()
+
+    def _safe_back(default_endpoint, **values):
+        if next_url.startswith("/") and not next_url.startswith("//"):
+            return redirect(next_url)
+        return redirect(url_for(default_endpoint, **values))
 
     if not has_role("director", "zamdirector", "deputy_director", "executor", "operator"):
         flash("Недостаточно прав для продления талона.", "danger")
@@ -912,12 +932,12 @@ def talon_extend(talon_id):
         new_valid_to = datetime.strptime(request.form.get("new_valid_to") or "", "%Y-%m-%d").date()
     except Exception:
         flash("Укажите новую дату окончания.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
+        return _safe_back("clients.client_talons", client_id=t.client_id, status="expired")
 
     today = kz_today()
     if new_valid_to < today:
         flash("Новая дата не может быть раньше сегодняшней.", "danger")
-        return redirect(url_for("clients.client_talons", client_id=t.client_id, status="expired"))
+        return _safe_back("clients.client_talons", client_id=t.client_id, status="expired")
 
     t.valid_from = today
     t.valid_to = new_valid_to

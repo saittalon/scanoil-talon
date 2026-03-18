@@ -1107,7 +1107,7 @@ def client_reports(client_id):
         except ValueError:
             date_to = ""
 
-    all_talons = q.order_by(Talon.id.desc()).all()
+    all_talons = q.order_by(Talon.created_at.desc(), Talon.id.desc()).all()
     balances = Balance.query.filter_by(client_id=client.id).order_by(Balance.updated_at.desc()).all()
     balance_liters = sum(float(b.liters_left or 0) for b in balances)
 
@@ -1150,7 +1150,7 @@ def client_reports(client_id):
                 "talons_count": 0,
                 "total_liters": 0.0,
                 "remaining_liters": 0.0,
-                "written_off_liters": 0.0,
+                "used_liters": 0.0,
                 "total_sum": 0.0,
             }
 
@@ -1159,12 +1159,15 @@ def client_reports(client_id):
         add_row["total_liters"] += liters
         add_row["total_sum"] += amount
         if state == "used":
-            add_row["written_off_liters"] += liters
+            add_row["used_liters"] += liters
         else:
             add_row["remaining_liters"] += liters
 
-        used_at_local = t.used_at
+        op_dt = t.used_at or t.created_at
+        station_name = t.used_agzs.name if getattr(t, "used_agzs", None) else ""
         detailed_rows.append({
+            "date": op_dt.strftime("%d.%m.%Y") if op_dt else "",
+            "time": op_dt.strftime("%H:%M:%S") if op_dt else "",
             "client": client.name,
             "holder_name": t.holder_name or client.name,
             "contract_number": t.contract.number if t.contract else "",
@@ -1173,12 +1176,8 @@ def client_reports(client_id):
             "nominal": liters,
             "remaining": 0.0 if state == "used" else liters,
             "written_off": liters if state == "used" else 0.0,
-            "valid_from": str(t.valid_from) if t.valid_from else "",
-            "valid_to": str(t.valid_to) if t.valid_to else "",
             "status": talon_status_label(t),
-            "used_date": used_at_local.strftime("%d.%m.%Y") if used_at_local else "",
-            "used_time": used_at_local.strftime("%H:%M:%S") if used_at_local else "",
-            "station": getattr(t, "redeemed_station_name", "") or "",
+            "station": station_name,
             "talon_code": t.code or "",
             "price": price,
             "amount": amount,
@@ -1240,4 +1239,5 @@ def client_reports(client_id):
         pagination=pagination,
         tabs=_client_tabs(client),
         active_tab="reports",
+        format_kz=format_kz,
     )

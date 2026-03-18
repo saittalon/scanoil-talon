@@ -162,6 +162,7 @@ def balance_set(client_id):
         product_name=product_name,
         old_liters=old_liters,
         requested_liters=liters_left,
+        new_liters=liters_left,
         delta_liters=delta_liters,
         balance_control=balance_control,
         comment=comment,

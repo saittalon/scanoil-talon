@@ -372,14 +372,33 @@ def delete_client_post():
         return redirect(url_for("clients.list_clients"))
 
     c = Client.query.get_or_404(int(client_id))
-    Talon.query.filter_by(client_id=c.id).delete()
-    Balance.query.filter_by(client_id=c.id).delete()
-    Contract.query.filter_by(client_id=c.id).delete()
-    log_audit("delete_client", f"{current_user.username} удалил клиента {c.name}", "client", c.id)
-    db.session.delete(c)
-    db.session.commit()
 
-    flash("Клиент удалён", "success")
+    try:
+        # Сначала удаляем все связанные записи, которые держат внешние ключи.
+        talon_ids = [tid for (tid,) in db.session.query(Talon.id).filter(Talon.client_id == c.id).all()]
+        contract_ids = [cid for (cid,) in db.session.query(Contract.id).filter(Contract.client_id == c.id).all()]
+
+        if talon_ids:
+            TalonRedemption.query.filter(TalonRedemption.talon_id.in_(talon_ids)).delete(synchronize_session=False)
+
+        if contract_ids:
+            ContractFile.query.filter(ContractFile.contract_id.in_(contract_ids)).delete(synchronize_session=False)
+
+        BalanceChangeRequest.query.filter_by(client_id=c.id).delete(synchronize_session=False)
+        Talon.query.filter_by(client_id=c.id).delete(synchronize_session=False)
+        Balance.query.filter_by(client_id=c.id).delete(synchronize_session=False)
+        Contract.query.filter_by(client_id=c.id).delete(synchronize_session=False)
+
+        log_audit("delete_client", f"{current_user.username} удалил клиента {c.name}", "client", c.id)
+        db.session.delete(c)
+        db.session.commit()
+
+        flash("Клиент удалён", "success")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Ошибка удаления клиента")
+        flash("Не удалось удалить клиента. Сначала были очищены связанные записи, но операция завершилась с ошибкой.", "danger")
+
     return redirect(url_for("clients.list_clients"))
 
 

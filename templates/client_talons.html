@@ -84,12 +84,10 @@
                   <div class="d-flex justify-content-end gap-2 flex-wrap">
                     {% if t.effective_state == 'active' %}
                       <form method="post" action="{{ url_for('clients.talon_use', talon_id=t.id) }}" style="display:inline">
-                        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
                         <button class="btn btn-outline-primary btn-sm">Использовать</button>
                       </form>
                     {% elif t.effective_state == 'expired' %}
                       <form method="post" action="{{ url_for('clients.talon_extend', talon_id=t.id) }}" style="display:inline" class="d-flex gap-2 align-items-center">
-                        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
                         <input type="date" class="form-control form-control-sm" name="new_valid_to" required>
                         <button class="btn btn-outline-warning btn-sm">Продлить</button>
                       </form>

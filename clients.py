@@ -1184,20 +1184,22 @@ def client_reports(client_id):
 
     start = None
     end = None
-
     if date_from:
         try:
             start = datetime.strptime(date_from, "%Y-%m-%d").date()
         except ValueError:
             date_from = ""
-
     if date_to:
         try:
             end = datetime.strptime(date_to, "%Y-%m-%d").date()
         except ValueError:
             date_to = ""
 
-    def in_period(dt_value):
+    def operation_dt(t):
+        return t.used_at or t.created_at
+
+    def in_period(t):
+        dt_value = operation_dt(t)
         if dt_value is None:
             return not start and not end
         dt_date = dt_value.date() if hasattr(dt_value, "date") else dt_value
@@ -1207,37 +1209,34 @@ def client_reports(client_id):
             return False
         return True
 
-    def op_dt(t):
-        return t.used_at or t.created_at
-
     all_client_talons = (
         Talon.query
         .filter_by(client_id=client.id)
         .order_by(Talon.id.desc())
         .all()
     )
+    filtered_talons = [t for t in all_client_talons if in_period(t)]
 
-    talons = [t for t in all_client_talons if in_period(op_dt(t))]
     balances = Balance.query.filter_by(client_id=client.id).order_by(Balance.updated_at.desc()).all()
     balance_liters = sum(float(b.liters_left or 0) for b in balances)
 
-    total_count = len(talons)
-    active_count = sum(1 for t in talons if talon_status(t) == "active")
-    used_count = sum(1 for t in talons if talon_status(t) == "used")
-    expired_count = sum(1 for t in talons if talon_status(t) == "expired")
-    blocked_count = sum(1 for t in talons if talon_status(t) == "blocked")
+    total_count = len(filtered_talons)
+    active_count = sum(1 for t in filtered_talons if talon_status(t) == "active")
+    used_count = sum(1 for t in filtered_talons if talon_status(t) == "used")
+    expired_count = sum(1 for t in filtered_talons if talon_status(t) == "expired")
+    blocked_count = sum(1 for t in filtered_talons if talon_status(t) == "blocked")
 
-    total_liters = sum(float(t.liters or 0) for t in talons)
-    active_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "active")
-    used_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "used")
-    expired_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "expired")
-    blocked_liters = sum(float(t.liters or 0) for t in talons if talon_status(t) == "blocked")
+    total_liters = sum(float(t.liters or 0) for t in filtered_talons)
+    active_liters = sum(float(t.liters or 0) for t in filtered_talons if talon_status(t) == "active")
+    used_liters = sum(float(t.liters or 0) for t in filtered_talons if talon_status(t) == "used")
+    expired_liters = sum(float(t.liters or 0) for t in filtered_talons if talon_status(t) == "expired")
+    blocked_liters = sum(float(t.liters or 0) for t in filtered_talons if talon_status(t) == "blocked")
 
-    detailed_rows = []
     total_sum = 0.0
+    detailed_rows = []
     addendum_buckets = {}
 
-    for t in talons:
+    for t in filtered_talons:
         contract = t.contract
         price = float(contract.price_per_liter or 0) if (contract and contract.price_per_liter is not None) else 0.0
         nominal = float(t.liters or 0)
@@ -1251,15 +1250,14 @@ def client_reports(client_id):
         if getattr(t, "addendum_file", None):
             addendum_name = t.addendum_file.original_name or t.addendum_file.title or ""
 
-        operation_dt = op_dt(t)
-
+        dt = operation_dt(t)
         detailed_rows.append({
-            "date": format_kz(operation_dt, "%d.%m.%Y") if operation_dt else "",
-            "time": format_kz(operation_dt, "%H:%M:%S") if operation_dt else "",
+            "date": format_kz(dt, "%d.%m.%Y") if dt else "",
+            "time": format_kz(dt, "%H:%M:%S") if dt else "",
             "client": client.name,
             "holder_name": t.holder_name or client.name,
             "contract_number": contract.number if contract else "",
-            "addendum_name": addendum_name,
+            "addendum_name": addendum_name or "— без доп. соглашения —",
             "product_name": t.product_name or "ГАЗ",
             "nominal": nominal,
             "remaining": remaining,
@@ -1285,16 +1283,22 @@ def client_reports(client_id):
         bucket["used_liters"] += written_off
         bucket["total_sum"] += amount
 
-    detailed_rows = sorted(
-        detailed_rows,
-        key=lambda r: (
-            str(r.get("addendum_name") or ""),
-            str(r.get("contract_number") or ""),
-            str(r.get("date") or ""),
-            str(r.get("time") or "")
-        ),
-        reverse=True
-    )
+    page = request.args.get("page", 1, type=int)
+    per_page = 100
+    total_rows = len(detailed_rows)
+    start_idx = max((page - 1) * per_page, 0)
+    end_idx = start_idx + per_page
+    paged_rows = detailed_rows[start_idx:end_idx]
+    total_pages = max(1, (total_rows + per_page - 1) // per_page)
+    pagination = {
+        "page": page,
+        "pages": total_pages,
+        "total": total_rows,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_num": page - 1,
+        "next_num": page + 1,
+    }
 
     summary_by_client = [{
         "client_name": client.name,
@@ -1306,16 +1310,16 @@ def client_reports(client_id):
         "blocked_liters": blocked_liters,
         "total_sum": total_sum,
     }]
-
     addendum_summary = list(addendum_buckets.values())
 
     return render_template(
         "client_reports.html",
         client=client,
         balances=balances,
+        talons=filtered_talons,
         summary_by_client=summary_by_client,
         addendum_summary=addendum_summary,
-        detailed_rows=detailed_rows,
+        detailed_rows=paged_rows,
         date_from=date_from,
         date_to=date_to,
         total_count=total_count,
@@ -1330,8 +1334,8 @@ def client_reports(client_id):
         blocked_liters=blocked_liters,
         balance_liters=balance_liters,
         total_sum=total_sum,
+        pagination=pagination,
         tabs=_client_tabs(client),
         active_tab="reports",
         format_kz=format_kz,
     )
-

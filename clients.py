@@ -129,7 +129,6 @@ def balance_set(client_id):
         bal.liters_left = liters_left
         bal.balance_control = balance_control
         bal.updated_at = datetime.utcnow()
-
         db.session.commit()
         flash("Остаток обновлён.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
@@ -151,7 +150,6 @@ def balance_set(client_id):
         existing_pending.comment = comment
         existing_pending.requested_by_user_id = current_user.id
         existing_pending.created_at = datetime.utcnow()
-
         db.session.commit()
         flash("Заявка уже существовала и была обновлена.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
@@ -161,7 +159,6 @@ def balance_set(client_id):
         contract_id=contract_id,
         balance_id=bal.id if bal else None,
         requested_by_user_id=current_user.id,
-        approved_by_user_id=None,
         product_name=product_name,
         old_liters=old_liters,
         requested_liters=liters_left,
@@ -170,14 +167,11 @@ def balance_set(client_id):
         comment=comment,
         status="pending",
         created_at=datetime.utcnow(),
-        decided_at=None,
     )
     db.session.add(req)
     db.session.commit()
-
     flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
-
 
 # ---------------- Клиенты ----------------
 @clients_bp.get("/clients")

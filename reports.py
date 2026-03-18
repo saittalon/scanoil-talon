@@ -75,12 +75,26 @@ def _resolve_period():
     return start, end, date_from, date_to, ''
 
 
+def _talon_operation_dt(t):
+    return t.used_at or t.created_at
+
+
+def _is_in_period(dt_value, start, end):
+    if dt_value is None:
+        return not start and not end
+    dt_date = dt_value.date() if hasattr(dt_value, 'date') else dt_value
+    if start and dt_date < start:
+        return False
+    if end and dt_date > end:
+        return False
+    return True
+
+
 def _filter_talons(q, start, end):
-    if start:
-        q = q.filter(Talon.created_at >= datetime.combine(start, datetime.min.time()))
-    if end:
-        q = q.filter(Talon.created_at <= datetime.combine(end, datetime.max.time()))
-    return q
+    talons = q.all()
+    if not start and not end:
+        return talons
+    return [t for t in talons if _is_in_period(_talon_operation_dt(t), start, end)]
 
 
 def _talon_left_and_spent(t):
@@ -180,21 +194,21 @@ def client_report_excel(client_id: int):
     date_from = (request.args.get('date_from') or '').strip()
     date_to = (request.args.get('date_to') or '').strip()
 
-    q = Talon.query.filter_by(client_id=client.id)
+    start = None
+    end = None
     if date_from:
         try:
             start = pd.to_datetime(date_from).date()
-            q = q.filter(Talon.created_at >= datetime.combine(start, datetime.min.time()))
         except Exception:
             date_from = ''
     if date_to:
         try:
             end = pd.to_datetime(date_to).date()
-            q = q.filter(Talon.created_at <= datetime.combine(end, datetime.max.time()))
         except Exception:
             date_to = ''
 
-    talons = q.order_by(Talon.created_at.desc(), Talon.id.desc()).all()
+    all_client_talons = Talon.query.filter_by(client_id=client.id).order_by(Talon.created_at.desc(), Talon.id.desc()).all()
+    talons = [t for t in all_client_talons if _is_in_period(_talon_operation_dt(t), start, end)]
     balances = Balance.query.filter_by(client_id=client.id).order_by(Balance.updated_at.desc()).all()
 
     total_count = len(talons)
@@ -319,8 +333,7 @@ def client_report_excel(client_id: int):
 @login_required
 def all_clients_report_excel():
     start, end, date_from, date_to, month = _resolve_period()
-    q = _filter_talons(Talon.query, start, end)
-    talons = q.order_by(Talon.id.asc()).all()
+    talons = _filter_talons(Talon.query.order_by(Talon.id.asc()), start, end)
     balances = Balance.query.order_by(Balance.updated_at.desc()).all()
 
     total_count = len(talons)
@@ -474,8 +487,7 @@ def all_clients_report_excel():
 @login_required
 def reports_all_page():
     start, end, date_from, date_to, month = _resolve_period()
-    q = _filter_talons(Talon.query, start, end)
-    talons = q.order_by(Talon.created_at.desc()).all()
+    talons = _filter_talons(Talon.query.order_by(Talon.created_at.desc()), start, end)
     _rows, summary_rows, balance_rows = _build_all_reports_data(talons)
     total_balance_liters = sum(float(item['Остаток'] or 0) for item in balance_rows)
 

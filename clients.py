@@ -105,7 +105,7 @@ def balance_set(client_id):
     old_liters = float(bal.liters_left or 0) if bal else 0.0
     delta_liters = liters_left - old_liters
 
-    if can_approve_balances():
+       if can_approve_balances():
         if bal is None:
             bal = Balance(
                 client_id=client.id,
@@ -118,24 +118,11 @@ def balance_set(client_id):
         bal.liters_left = liters_left
         bal.balance_control = balance_control
         bal.updated_at = datetime.utcnow()
-
-        log_audit(
-            "balance_set",
-            f"{current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}: "
-            f"{old_liters:.2f} -> {liters_left:.2f}",
-            "client",
-            client.id
-        )
         db.session.commit()
-
-        notify_event(
-            "Обновлен остаток",
-            f"Пользователь {current_user.username} обновил остаток по договору #{contract_id} клиента {client.name}"
-        )
         flash("Остаток обновлён.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
-        existing_pending = (
+    existing_pending = (
         BalanceChangeRequest.query
         .filter_by(client_id=client.id, contract_id=contract_id, status="pending")
         .order_by(BalanceChangeRequest.id.desc())
@@ -152,15 +139,8 @@ def balance_set(client_id):
         existing_pending.comment = comment
         existing_pending.requested_by_user_id = current_user.id
         existing_pending.created_at = datetime.utcnow()
-
         db.session.commit()
-
-        created_check = BalanceChangeRequest.query.get(existing_pending.id)
-        if created_check:
-            flash("Заявка уже существовала и была обновлена.", "success")
-        else:
-            flash("Не удалось обновить заявку.", "danger")
-
+        flash("Заявка уже существовала и была обновлена.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
     req = BalanceChangeRequest(
@@ -178,18 +158,8 @@ def balance_set(client_id):
         created_at=datetime.utcnow(),
     )
     db.session.add(req)
-    db.session.flush()
-
-    new_request_id = req.id
-
     db.session.commit()
-
-    created_check = BalanceChangeRequest.query.get(new_request_id)
-    if created_check:
-        flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
-    else:
-        flash("Заявка не сохранилась в базе.", "danger")
-
+    flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
 # ---------------- Клиенты ----------------

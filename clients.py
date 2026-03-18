@@ -157,7 +157,8 @@ def balance_set(client_id):
         existing_pending.balance_id = bal.id if bal else None
         existing_pending.product_name = product_name
         existing_pending.old_liters = old_liters
-        existing_pending.requested_liters = liters_left
+        if hasattr(existing_pending, "requested_liters"):
+            existing_pending.requested_liters = liters_left
         if hasattr(existing_pending, "new_liters"):
             existing_pending.new_liters = liters_left
         existing_pending.delta_liters = delta_liters
@@ -176,7 +177,7 @@ def balance_set(client_id):
         flash("Заявка уже существовала и была обновлена.", "success")
         return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
-    req_kwargs = dict(
+    req = BalanceChangeRequest(
         client_id=client.id,
         contract_id=contract_id,
         balance_id=bal.id if bal else None,
@@ -190,10 +191,8 @@ def balance_set(client_id):
         status="pending",
         created_at=datetime.utcnow(),
     )
-    if hasattr(BalanceChangeRequest, "new_liters"):
-        req_kwargs["new_liters"] = liters_left
-
-    req = BalanceChangeRequest(**req_kwargs)
+    if hasattr(req, "new_liters"):
+        req.new_liters = liters_left
     db.session.add(req)
 
     log_audit(
@@ -243,9 +242,9 @@ def approve_balance_request(request_id):
         )
         db.session.add(bal)
 
-    target_liters = req.requested_liters
-    if hasattr(req, "new_liters") and req.new_liters is not None:
-        target_liters = req.new_liters
+    target_liters = getattr(req, "new_liters", None)
+    if target_liters is None:
+        target_liters = req.requested_liters
 
     bal.product_name = req.product_name or bal.product_name or "ГАЗ"
     bal.liters_left = float(target_liters or 0)
@@ -278,66 +277,6 @@ def reject_balance_request(request_id):
     req.approved_by_user_id = current_user.id
     req.decided_at = datetime.utcnow()
 
-    db.session.commit()
-    flash("Заявка отклонена.", "warning")
-    return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
-
-
-@clients_bp.post("/balance-requests/<int:request_id>/approve")
-@login_required
-def approve_balance_request(request_id):
-    if not can_approve_balances():
-        flash("Недостаточно прав.", "danger")
-        return redirect(url_for("clients.list_clients"))
-
-    req = BalanceChangeRequest.query.get_or_404(request_id)
-    if req.status != "pending":
-        flash("Заявка уже обработана.", "warning")
-        return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
-
-    bal = None
-    if req.balance_id:
-        bal = Balance.query.get(req.balance_id)
-    if bal is None:
-        bal = Balance.query.filter_by(client_id=req.client_id, contract_id=req.contract_id, product_name=req.product_name).first()
-    if bal is None:
-        bal = Balance.query.filter_by(client_id=req.client_id, contract_id=req.contract_id).first()
-    if bal is None:
-        bal = Balance(client_id=req.client_id, contract_id=req.contract_id, product_name=req.product_name)
-        db.session.add(bal)
-
-    bal.product_name = req.product_name or bal.product_name or "ГАЗ"
-    bal.liters_left = float(req.requested_liters or 0)
-    bal.balance_control = bool(req.balance_control)
-    bal.updated_at = datetime.utcnow()
-
-    req.balance = bal
-    req.approved_by_user_id = current_user.id
-    req.status = "approved"
-    req.decided_at = datetime.utcnow()
-
-    log_audit("balance_request_approve", f"{current_user.username} подтвердил заявку #{req.id}", "client", req.client_id)
-    db.session.commit()
-    flash("Заявка подтверждена. Остаток обновлён.", "success")
-    return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
-
-
-@clients_bp.post("/balance-requests/<int:request_id>/reject")
-@login_required
-def reject_balance_request(request_id):
-    if not can_approve_balances():
-        flash("Недостаточно прав.", "danger")
-        return redirect(url_for("clients.list_clients"))
-
-    req = BalanceChangeRequest.query.get_or_404(request_id)
-    if req.status != "pending":
-        flash("Заявка уже обработана.", "warning")
-        return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))
-
-    req.status = "rejected"
-    req.approved_by_user_id = current_user.id
-    req.decided_at = datetime.utcnow()
-    log_audit("balance_request_reject", f"{current_user.username} отклонил заявку #{req.id}", "client", req.client_id)
     db.session.commit()
     flash("Заявка отклонена.", "warning")
     return redirect(url_for("clients.client_contracts", client_id=req.client_id, id=req.contract_id))

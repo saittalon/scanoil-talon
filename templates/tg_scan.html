@@ -116,6 +116,22 @@
       z-index: 30;
       background: transparent;
     }
+
+    .retry-btn {
+      margin-top: 18px;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 18px;
+      font-size: 16px;
+      font-weight: 800;
+      background: rgba(255,255,255,.95);
+      color: #08102a;
+      display: none;
+    }
+
+    .result.show .retry-btn {
+      display: inline-block;
+    }
   </style>
 </head>
 <body>
@@ -130,6 +146,7 @@
       <div id="resultIcon" class="icon">✓</div>
       <div id="resultText" class="text"></div>
       <div id="resultSub" class="sub"></div>
+      <button id="retryBtn" class="retry-btn" type="button">Повторить</button>
     </div>
 
     <div id="tapUnlock"></div>
@@ -167,6 +184,7 @@
     let busy = false;
     let lastCode = "";
     let lastAt = 0;
+    let cameraError = false;
     let audioUnlocked = false;
 
     if (tg) {
@@ -311,7 +329,7 @@
             (data.used_at_text || "") +
             (data.agzs ? "\nАГЗС: " + data.agzs : "");
 
-          showResult("ok", `Талон №${data.serial || code} принят`, sub);
+          showResult("ok", `Талон ${displayTalonNumber(data, code)} принят`, sub);
           return;
         }
 
@@ -320,7 +338,7 @@
             (data.used_at_text || "") +
             (data.agzs ? "\nАГЗС: " + data.agzs : "");
 
-          showResult("error", `Талон №${data.serial || code} уже использован`, sub);
+          showResult("error", `Талон ${displayTalonNumber(data, code)} уже использован`, sub);
           return;
         }
 
@@ -339,7 +357,7 @@
         }
 
         if (data.error === "token_expired" || data.error === "not_logged_in") {
-          showResult("error", "Сессия истекла", "Откройте сканер заново из Telegram");
+          showResult("error", "Сессия истекла", "Нажмите сканировать заново в Telegram");
           return;
         }
 
@@ -394,7 +412,8 @@
         setStatus("📷 Наведите камеру на QR талона");
         setTimeout(scanOnce, 250);
       } catch (e) {
-        showResult("error", "Не удалось открыть камеру");
+        cameraError = true;
+        showResult("error", "Камера не работает", "Нажмите «Повторить» или дайте доступ к камере");
       }
     }
 
@@ -406,11 +425,25 @@
       try {
         tapUnlock.style.display = "none";
       } catch (e) {}
+
+      if (!stream || cameraError) {
+        startCamera();
+      }
     }
 
     tapUnlock.addEventListener("touchstart", firstGestureInit, { once: true });
     tapUnlock.addEventListener("touchend", firstGestureInit, { once: true });
     tapUnlock.addEventListener("click", firstGestureInit, { once: true });
+
+    retryBtn.addEventListener("click", () => {
+      startCamera();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && (!stream || cameraError) && !busy) {
+        startCamera();
+      }
+    });
 
     window.addEventListener("load", async () => {
       startCamera();

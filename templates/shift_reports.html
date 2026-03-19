@@ -102,10 +102,8 @@
                 <div class="col-md-3"><div class="mini-stat"><div class="mini-stat-label">Закрыта</div><div class="mini-stat-value">{{ format_kz(shift.closed_at, '%d.%m.%Y %H:%M') if shift.closed_at else '—' }}</div></div></div>
                 <div class="col-md-3"><div class="mini-stat"><div class="mini-stat-label">Талонов / литров</div><div class="mini-stat-value">{{ shift.total_talons or 0 }} / {{ '%.2f'|format(shift.total_liters or 0) }}</div></div></div>
               </div>
-              <div class="card bg-light border-0">
-                <div class="card-body">
-                  <pre style="white-space: pre-wrap; margin: 0; font-family: inherit;">{{ shift.report_text or 'Нет текста отчёта' }}</pre>
-                </div>
+              <div class="report-box">
+                <pre class="report-pre">{{ shift.report_text or 'Нет текста отчёта' }}</pre>
               </div>
             </div>
           </div>
@@ -118,8 +116,15 @@
 </div>
 
 <style>
-  .mini-stat{background:#f8fafc;border-radius:16px;padding:14px 16px;height:100%}
-  .mini-stat-label{font-size:.82rem;color:#6b7280;margin-bottom:6px}
-  .mini-stat-value{font-weight:700}
+  .mini-stat{background:linear-gradient(180deg, rgba(16,28,68,.96), rgba(10,18,44,.98));border:1px solid rgba(173,196,255,.14);border-radius:16px;padding:14px 16px;height:100%}
+  .mini-stat-label{font-size:.82rem;color:#9fb5ea;margin-bottom:6px}
+  .mini-stat-value{font-weight:700;color:#edf3ff}
+  .accordion-item{background:linear-gradient(180deg, rgba(13,24,59,.96), rgba(10,18,45,.98));border:1px solid rgba(173,196,255,.12)!important}
+  .accordion-button,.accordion-button:not(.collapsed){background:#0f1c46;color:#edf3ff;box-shadow:none}
+  .accordion-button .text-muted,.accordion-button .small{color:#b8c8ef!important}
+  .accordion-button::after{filter:invert(1) brightness(2)}
+  .accordion-body{background:#0a1533;color:#edf3ff}
+  .report-box{background:rgba(6,13,33,.88);border:1px solid rgba(173,196,255,.12);border-radius:18px;padding:16px}
+  .report-pre{white-space:pre-wrap;margin:0;font-family:inherit;color:#edf3ff}
 </style>
 {% endblock %}

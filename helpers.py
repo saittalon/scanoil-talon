@@ -160,3 +160,23 @@ def redeem_talon_atomic(*, code=None, talon_id=None, used_at=None, agzs_id=None,
 
     talon = Talon.query.filter(*filters).first()
     return 'redeemed', talon
+
+
+def format_talon_number(value):
+    raw = ''.join(ch for ch in str(value or '') if ch.isdigit())
+    if not raw:
+        return '—'
+    if len(raw) <= 3:
+        return raw
+    parts = [raw[i:i+3] for i in range(0, len(raw), 3)]
+    return ' '.join(parts)
+
+
+def talon_display_number(talon):
+    if talon is None:
+        return '—'
+    code = getattr(talon, 'code', None)
+    if code:
+        return format_talon_number(code)
+    serial = getattr(talon, 'serial_number', None)
+    return str(serial or '—')

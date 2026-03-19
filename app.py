@@ -21,7 +21,7 @@ from models import (
 from auth import auth_bp
 from clients import clients_bp
 from reports import reports_bp
-from helpers import require_roles, talon_status_label, format_kz, kz_now, redeem_talon_atomic
+from helpers import require_roles, talon_status_label, format_kz, kz_now, redeem_talon_atomic, talon_display_number
 from models import AuditLog
 from mail_utils import send_daily_report
 from contract_files import contract_files_bp
@@ -451,7 +451,7 @@ def create_app():
 
         if redeem_status == "expired":
             msg = (
-                f"❌ Талон №{talon.serial_number or code} недействителен\n"
+                f"❌ Талон {talon_display_number(talon)} недействителен\n"
                 f"Срок действия: {talon.valid_from.strftime('%d.%m.%Y') if talon.valid_from else '—'} — {talon.valid_to.strftime('%d.%m.%Y') if talon.valid_to else '—'}"
             )
             _send_telegram_message(str(t.telegram_user_id), msg)
@@ -459,6 +459,7 @@ def create_app():
                 "ok": False,
                 "error": "expired",
                 "serial": talon.serial_number,
+                "talon_number": talon_display_number(talon),
                 "valid_from": talon.valid_from.isoformat() if talon.valid_from else None,
                 "valid_to": talon.valid_to.isoformat() if talon.valid_to else None,
             }), 409
@@ -474,7 +475,7 @@ def create_app():
             used_agzs_name = last.agzs.name if last and last.agzs else talon.used_agzs.name if talon.used_agzs else None
             used_text = format_kz(used_dt) if used_dt else '—'
             msg = (
-                f"❌ Талон №{talon.serial_number or code} уже использован\n"
+                f"❌ Талон {talon_display_number(talon)} уже использован\n"
                 f"Дата и время: {used_text}\n"
                 f"АГЗС: {used_agzs_name or '—'}"
             )
@@ -483,14 +484,15 @@ def create_app():
                 "ok": False,
                 "error": "already_used",
                 "serial": talon.serial_number,
+                "talon_number": talon_display_number(talon),
                 "used_at": used_dt.isoformat() if used_dt else None,
                 "used_at_text": used_text,
                 "agzs": used_agzs_name,
             }), 409
 
         if redeem_status != "redeemed":
-            _send_telegram_message(str(t.telegram_user_id), f"❌ Талон №{talon.serial_number or code} недоступен для использования")
-            return jsonify({"ok": False, "error": "not_active", "serial": talon.serial_number}), 409
+            _send_telegram_message(str(t.telegram_user_id), f"❌ Талон {talon_display_number(talon)} недоступен для использования")
+            return jsonify({"ok": False, "error": "not_active", "serial": talon.serial_number, "talon_number": talon_display_number(talon)}), 409
 
         red = TalonRedemption(
             talon_id=talon.id,
@@ -510,7 +512,7 @@ def create_app():
         except Exception:
             amount = 0.0
         success_msg = (
-            f"✅ Талон №{getattr(talon, 'serial_number', code) or code} принят\n"
+            f"✅ Талон {talon_display_number(talon)} принят\n"
             f"Время: {format_kz(used_time)}\n"
             f"АГЗС: {sess.agzs.name if sess.agzs else '—'}\n"
             f"Объем: {float(getattr(talon, 'liters', 0) or 0):.2f} л\n"
@@ -523,6 +525,7 @@ def create_app():
             "liters": getattr(talon, "liters", None),
             "product": getattr(talon, "product_name", None),
             "serial": getattr(talon, "serial_number", None),
+            "talon_number": talon_display_number(talon),
             "valid_from": str(getattr(talon, "valid_from", "")),
             "valid_to": str(getattr(talon, "valid_to", "")),
             "agzs": sess.agzs.name if sess.agzs else None,

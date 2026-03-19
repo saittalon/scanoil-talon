@@ -21,7 +21,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from app import create_app
 from models import db, Talon, AGZS, BotSession, TalonRedemption, WebAppToken, Shift
-from helpers import kz_now, to_kz, redeem_talon_atomic
+from helpers import kz_now, to_kz, redeem_talon_atomic, talon_display_number
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 WEBAPP_BASE_URL = os.getenv("WEBAPP_BASE_URL", "").strip().rstrip("/")
@@ -108,7 +108,7 @@ def _make_scan_url(flask_app, tg_user_id: int) -> str | None:
         return None
 
     token = secrets.token_urlsafe(32)
-    expires_at = kz_now() + timedelta(minutes=10)
+    expires_at = kz_now() + timedelta(hours=12)
 
     with flask_app.app_context():
         db.session.add(WebAppToken(
@@ -564,7 +564,7 @@ async def close_shift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time_str = to_kz(r.used_at).strftime("%H:%M") if r.used_at else "--:--"
 
             talon_lines.append(
-                f"{i}. №{talon.serial_number or 'без номера'} | код {talon.code or '—'} | {liters:.2f} л | {_format_money(amount)} ₸ | {time_str}"
+                f"{i}. Талон {talon_display_number(talon)} | {liters:.2f} л | {_format_money(amount)} ₸ | {time_str}"
             )
 
         shift.total_talons = len(redemptions)

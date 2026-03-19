@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+  <div class="hero-kicker">Смены АГЗС</div>
+  <div class="hero-title">Отчёты по сменам по всем АГЗС</div>
+</div>
+
+<div class="card card-soft mb-4">
+  <form method="get" class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label">АГЗС</label>
+      <select class="form-select" name="agzs_id">
+        <option value="">Все АГЗС</option>
+        {% for agzs in agzs_list %}
+          <option value="{{ agzs.id }}" {{ 'selected' if selected_agzs_id == agzs.id else '' }}>{{ agzs.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Дата с</label>
+      <input type="date" class="form-control" name="date_from" value="{{ date_from }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Дата по</label>
+      <input type="date" class="form-control" name="date_to" value="{{ date_to }}">
+    </div>
+    <div class="col-md-3 d-flex gap-2">
+      <button class="btn btn-brand w-100" type="submit">Показать</button>
+      <a class="btn btn-outline-secondary" href="/reports/shifts">Сбросить</a>
+    </div>
+  </form>
+</div>
+
+<div class="metrics-grid mb-4">
+  <div class="metric-card"><div class="metric-label">Смен закрыто</div><div class="metric-value">{{ total_shifts }}</div></div>
+  <div class="metric-card"><div class="metric-label">Талонов за смены</div><div class="metric-value">{{ total_talons }}</div></div>
+  <div class="metric-card"><div class="metric-label">Общий литраж</div><div class="metric-value">{{ '%.2f'|format(total_liters or 0) }} л</div></div>
+  <div class="metric-card"><div class="metric-label">Общая сумма</div><div class="metric-value">{{ '{:,.0f}'.format(total_amount or 0).replace(',', ' ') }} ₸</div></div>
+</div>
+
+<div class="card card-soft mb-4">
+  <div class="section-title mb-3">Сводка по АГЗС</div>
+  {% if agzs_summary %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>АГЗС</th>
+          <th>Смен</th>
+          <th>Талонов</th>
+          <th>Литров</th>
+          <th>Сумма</th>
+          <th>Последнее закрытие</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in agzs_summary %}
+        <tr>
+          <td>{{ row.agzs_name }}</td>
+          <td>{{ row.shifts_count }}</td>
+          <td>{{ row.total_talons }}</td>
+          <td>{{ '%.2f'|format(row.total_liters or 0) }}</td>
+          <td>{{ '{:,.0f}'.format(row.total_amount or 0).replace(',', ' ') }} ₸</td>
+          <td>{{ format_kz(row.last_closed_at, '%d.%m.%Y %H:%M') if row.last_closed_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <div class="text-muted">Закрытых смен пока нет.</div>
+  {% endif %}
+</div>
+
+<div class="card card-soft">
+  <div class="section-title mb-3">Все отчёты по сменам</div>
+  {% if shifts %}
+    <div class="accordion" id="shiftAccordion">
+      {% for shift in shifts %}
+        <div class="accordion-item mb-3 border-0 rounded-4 overflow-hidden shadow-sm">
+          <h2 class="accordion-header" id="heading{{ shift.id }}">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ shift.id }}" aria-expanded="false" aria-controls="collapse{{ shift.id }}">
+              <div class="w-100 pe-3">
+                <div class="d-flex flex-wrap justify-content-between gap-2">
+                  <div><strong>{{ shift.agzs.name if shift.agzs else '—' }}</strong></div>
+                  <div>{{ format_kz(shift.closed_at, '%d.%m.%Y %H:%M') if shift.closed_at else '—' }}</div>
+                </div>
+                <div class="small text-muted mt-1">
+                  Открыта: {{ format_kz(shift.opened_at, '%d.%m.%Y %H:%M') if shift.opened_at else '—' }}
+                  · Талонов: {{ shift.total_talons or 0 }}
+                  · Литров: {{ '%.2f'|format(shift.total_liters or 0) }}
+                  · Сумма: {{ '{:,.0f}'.format(shift.total_amount or 0).replace(',', ' ') }} ₸
+                </div>
+              </div>
+            </button>
+          </h2>
+          <div id="collapse{{ shift.id }}" class="accordion-collapse collapse" aria-labelledby="heading{{ shift.id }}" data-bs-parent="#shiftAccordion">
+            <div class="accordion-body">
+              <div class="row g-3 mb-3">
+                <div class="col-md-3"><div class="mini-stat"><div class="mini-stat-label">АГЗС</div><div class="mini-stat-value">{{ shift.agzs.name if shift.agzs else '—' }}</div></div></div>
+                <div class="col-md-3"><div class="mini-stat"><div class="mini-stat-label">Открыта</div><div class="mini-stat-value">{{ format_kz(shift.opened_at, '%d.%m.%Y %H:%M') if shift.opened_at else '—' }}</div></div></div>
+                <div class="col-md-3"><div class="mini-stat"><div class="mini-stat-label">Закрыта</div><div class="mini-stat-value">{{ format_kz(shift.closed_at, '%d.%m.%Y %H:%M') if shift.closed_at else '—' }}</div></div></div>
+                <div class="col-md-3"><div class="mini-stat"><div class="mini-stat-label">Талонов / литров</div><div class="mini-stat-value">{{ shift.total_talons or 0 }} / {{ '%.2f'|format(shift.total_liters or 0) }}</div></div></div>
+              </div>
+              <div class="card bg-light border-0">
+                <div class="card-body">
+                  <pre style="white-space: pre-wrap; margin: 0; font-family: inherit;">{{ shift.report_text or 'Нет текста отчёта' }}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-muted">Отчёты по сменам не найдены.</div>
+  {% endif %}
+</div>
+
+<style>
+  .mini-stat{background:#f8fafc;border-radius:16px;padding:14px 16px;height:100%}
+  .mini-stat-label{font-size:.82rem;color:#6b7280;margin-bottom:6px}
+  .mini-stat-value{font-weight:700}
+</style>
+{% endblock %}

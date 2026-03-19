@@ -177,6 +177,7 @@
     const okAudio = document.getElementById("okAudio");
     const errAudio = document.getElementById("errAudio");
     const tapUnlock = document.getElementById("tapUnlock");
+    const retryBtn = document.getElementById("retryBtn");
 
     let stream = null;
     let detector = null;
@@ -256,17 +257,22 @@
       playAudio(errAudio);
     }
 
-    function showResult(kind, text, sub = "") {
+    function showResult(kind, text, sub = "", options = {}) {
+      const autoClose = options.autoClose !== false;
+      const allowRetry = options.allowRetry === true;
       active = false;
+      busy = false;
 
       try {
         if (stream) stream.getTracks().forEach(t => t.stop());
       } catch (e) {}
+      stream = null;
 
       resultEl.className = `result show ${kind === "ok" ? "ok" : "error"}`;
       resultIconEl.textContent = kind === "ok" ? "✓" : "✕";
       resultTextEl.textContent = text;
       resultSubEl.textContent = sub || "";
+      retryBtn.style.display = allowRetry ? "inline-block" : "none";
 
       if (kind === "ok") {
         playOk();
@@ -274,12 +280,14 @@
         playErr();
       }
 
-      setTimeout(() => {
-        try {
-          if (tg) tg.close();
-          else window.close();
-        } catch (e) {}
-      }, 2500);
+      if (autoClose) {
+        setTimeout(() => {
+          try {
+            if (tg) tg.close();
+            else window.close();
+          } catch (e) {}
+        }, 2500);
+      }
     }
 
     function normalizeCode(raw) {
@@ -304,11 +312,26 @@
       return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
     }
 
+    function hideResult() {
+      resultEl.className = "result";
+      resultTextEl.textContent = "";
+      resultSubEl.textContent = "";
+      retryBtn.style.display = "none";
+    }
+
+    function displayTalonNumber(data, fallbackCode = "") {
+      const value = (data && (data.talon_number || data.code || data.serial)) || fallbackCode || "";
+      const digits = String(value).replace(/\D+/g, "");
+      if (!digits) return String(value || fallbackCode || "—");
+      return digits.match(/.{1,3}/g).join(" ");
+    }
+
     async function submitCode(rawCode) {
       const code = normalizeCode(rawCode);
       if (!code) return;
 
       busy = true;
+      hideResult();
       setStatus("⏳ Проверяю талон...");
 
       try {
@@ -357,13 +380,13 @@
         }
 
         if (data.error === "token_expired" || data.error === "not_logged_in") {
-          showResult("error", "Сессия истекла", "Нажмите сканировать заново в Telegram");
+          showResult("error", "Сессия истекла", "Нажмите сканировать заново в Telegram", { autoClose: false, allowRetry: true });
           return;
         }
 
-        showResult("error", "Ошибка проверки талона");
+        showResult("error", "Ошибка проверки талона", "Попробуйте отсканировать ещё раз", { autoClose: false, allowRetry: true });
       } catch (e) {
-        showResult("error", "Ошибка сети");
+        showResult("error", "Ошибка сети", "Попробуйте ещё раз", { autoClose: false, allowRetry: true });
       }
     }
 
@@ -413,7 +436,7 @@
         setTimeout(scanOnce, 250);
       } catch (e) {
         cameraError = true;
-        showResult("error", "Камера не работает", "Нажмите «Повторить» или дайте доступ к камере");
+        showResult("error", "Камера не работает", "Нажмите «Повторить» или дайте доступ к камере", { autoClose: false, allowRetry: true });
       }
     }
 
@@ -436,11 +459,18 @@
     tapUnlock.addEventListener("click", firstGestureInit, { once: true });
 
     retryBtn.addEventListener("click", () => {
+      cameraError = false;
+      active = true;
+      busy = false;
+      hideResult();
+      setStatus("📷 Наведите камеру на QR талона");
       startCamera();
     });
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && (!stream || cameraError) && !busy) {
+        active = true;
+        hideResult();
         startCamera();
       }
     });

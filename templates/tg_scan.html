@@ -73,6 +73,7 @@
 
     .result.show {
       opacity: 1;
+      pointer-events: auto;
     }
 
     .result.ok {
@@ -110,13 +111,6 @@
       display: none;
     }
 
-    #tapUnlock {
-      position: fixed;
-      inset: 0;
-      z-index: 30;
-      background: transparent;
-    }
-
     .retry-btn {
       margin-top: 18px;
       border: 0;
@@ -148,19 +142,10 @@
       <div id="resultSub" class="sub"></div>
       <button id="retryBtn" class="retry-btn" type="button">Повторить</button>
     </div>
-
-    <div id="tapUnlock"></div>
   </div>
 
-  <!-- УСПЕХ -->
-  <audio id="okAudio" preload="auto">
-    <source src="{{ url_for('static', filename='success.wav') }}" type="audio/wav">
-  </audio>
-
-  <!-- ОШИБКА -->
-  <audio id="errAudio" preload="auto">
-    <source src="{{ url_for('static', filename='error.wav') }}" type="audio/wav">
-  </audio>
+  <audio id="okAudio" preload="auto" playsinline src="{{ url_for('static', filename='scan.wav') }}"></audio>
+  <audio id="errAudio" preload="auto" playsinline src="{{ url_for('static', filename='error.wav') }}"></audio>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
@@ -176,7 +161,6 @@
     const resultSubEl = document.getElementById("resultSub");
     const okAudio = document.getElementById("okAudio");
     const errAudio = document.getElementById("errAudio");
-    const tapUnlock = document.getElementById("tapUnlock");
     const retryBtn = document.getElementById("retryBtn");
 
     let stream = null;
@@ -186,7 +170,7 @@
     let lastCode = "";
     let lastAt = 0;
     let cameraError = false;
-    let audioUnlocked = false;
+    let audioPrimed = false;
 
     if (tg) {
       tg.ready();
@@ -214,23 +198,40 @@
       } catch (e) {}
     }
 
-    async function unlockAudio() {
-      if (audioUnlocked) return true;
+    async function primeAudio() {
+      if (audioPrimed) return true;
 
       try {
-        okAudio.muted = false;
-        errAudio.muted = false;
+        okAudio.muted = true;
+        errAudio.muted = true;
         okAudio.volume = 1;
         errAudio.volume = 1;
+        okAudio.preload = "auto";
+        errAudio.preload = "auto";
 
-        okAudio.load();
-        errAudio.load();
+        const p1 = okAudio.play();
+        if (p1 && typeof p1.then === "function") {
+          await p1.then(() => {
+            okAudio.pause();
+            okAudio.currentTime = 0;
+          }).catch(() => {});
+        }
 
-        audioUnlocked = true;
-        return true;
-      } catch (e) {
-        return false;
-      }
+        const p2 = errAudio.play();
+        if (p2 && typeof p2.then === "function") {
+          await p2.then(() => {
+            errAudio.pause();
+            errAudio.currentTime = 0;
+          }).catch(() => {});
+        }
+      } catch (e) {}
+
+      okAudio.muted = false;
+      errAudio.muted = false;
+      okAudio.volume = 1;
+      errAudio.volume = 1;
+      audioPrimed = true;
+      return true;
     }
 
     function playAudio(el) {
@@ -239,11 +240,8 @@
         el.currentTime = 0;
         el.muted = false;
         el.volume = 1;
-
         const p = el.play();
-        if (p && typeof p.catch === "function") {
-          p.catch(() => {});
-        }
+        if (p && typeof p.catch === "function") p.catch(() => {});
       } catch (e) {}
     }
 
@@ -274,11 +272,8 @@
       resultSubEl.textContent = sub || "";
       retryBtn.style.display = allowRetry ? "inline-block" : "none";
 
-      if (kind === "ok") {
-        playOk();
-      } else {
-        playErr();
-      }
+      if (kind === "ok") playOk();
+      else playErr();
 
       if (autoClose) {
         setTimeout(() => {
@@ -295,11 +290,7 @@
 
       try {
         const u = new URL(code);
-        code =
-          u.searchParams.get("code") ||
-          u.searchParams.get("talon") ||
-          u.searchParams.get("id") ||
-          code;
+        code = u.searchParams.get("code") || u.searchParams.get("talon") || u.searchParams.get("id") || code;
       } catch (e) {}
 
       const m = code.match(/(\d{6,})/);
@@ -348,29 +339,19 @@
         const data = await res.json().catch(() => ({ ok: false, error: "bad_json" }));
 
         if (res.ok && data.ok) {
-          const sub =
-            (data.used_at_text || "") +
-            (data.agzs ? "\nАГЗС: " + data.agzs : "");
-
+          const sub = (data.used_at_text || "") + (data.agzs ? "\nАГЗС: " + data.agzs : "");
           showResult("ok", `Талон ${displayTalonNumber(data, code)} принят`, sub);
           return;
         }
 
         if (data.error === "already_used") {
-          const sub =
-            (data.used_at_text || "") +
-            (data.agzs ? "\nАГЗС: " + data.agzs : "");
-
+          const sub = (data.used_at_text || "") + (data.agzs ? "\nАГЗС: " + data.agzs : "");
           showResult("error", `Талон ${displayTalonNumber(data, code)} уже использован`, sub);
           return;
         }
 
         if (data.error === "expired") {
-          showResult(
-            "error",
-            "Срок действия талона истёк",
-            `Срок действия: ${fmtDate(data.valid_from)} — ${fmtDate(data.valid_to)}`
-          );
+          showResult("error", "Срок действия талона истёк", `Срок действия: ${fmtDate(data.valid_from)} — ${fmtDate(data.valid_to)}`);
           return;
         }
 
@@ -395,11 +376,9 @@
 
       try {
         const codes = await detector.detect(video);
-
         if (codes && codes.length) {
           const code = normalizeCode(codes[0].rawValue || "");
           const now = Date.now();
-
           if (code && (code !== lastCode || now - lastAt > 2500)) {
             lastCode = code;
             lastAt = now;
@@ -409,17 +388,13 @@
         }
       } catch (e) {}
 
-      if (active && !busy) {
-        setTimeout(scanOnce, 180);
-      }
+      if (active && !busy) setTimeout(scanOnce, 180);
     }
 
     async function startCamera() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" }
-          },
+          video: { facingMode: { ideal: "environment" } },
           audio: false
         });
 
@@ -440,42 +415,27 @@
       }
     }
 
-    async function firstGestureInit() {
-      try {
-        await unlockAudio();
-      } catch (e) {}
-
-      try {
-        tapUnlock.style.display = "none";
-      } catch (e) {}
-
-      if (!stream || cameraError) {
-        startCamera();
-      }
-    }
-
-    tapUnlock.addEventListener("touchstart", firstGestureInit, { once: true });
-    tapUnlock.addEventListener("touchend", firstGestureInit, { once: true });
-    tapUnlock.addEventListener("click", firstGestureInit, { once: true });
-
-    retryBtn.addEventListener("click", () => {
+    retryBtn.addEventListener("click", async () => {
       cameraError = false;
       active = true;
       busy = false;
       hideResult();
       setStatus("📷 Наведите камеру на QR талона");
+      await primeAudio();
       startCamera();
     });
 
-    document.addEventListener("visibilitychange", () => {
+    document.addEventListener("visibilitychange", async () => {
       if (document.visibilityState === "visible" && (!stream || cameraError) && !busy) {
         active = true;
         hideResult();
+        await primeAudio();
         startCamera();
       }
     });
 
     window.addEventListener("load", async () => {
+      await primeAudio();
       startCamera();
     });
 

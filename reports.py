@@ -4,7 +4,7 @@ from io import BytesIO
 from calendar import monthrange
 from datetime import date, datetime
 import pandas as pd
-from models import Client, Talon, Balance
+from models import Client, Talon, Balance, Shift, AGZS
 from helpers import talon_status_label, format_kz
 
 reports_bp = Blueprint('reports', __name__)
@@ -74,6 +74,18 @@ def _resolve_period():
             date_to = ''
     return start, end, date_from, date_to, ''
 
+
+
+
+
+def _parse_date_arg(value: str):
+    value = (value or '').strip()
+    if not value:
+        return None, ''
+    try:
+        return pd.to_datetime(value).date(), value
+    except Exception:
+        return None, ''
 
 def _talon_operation_dt(t):
     return t.used_at or t.created_at
@@ -548,6 +560,75 @@ def reports_all_page():
         date_to=date_to,
         selected_month=month,
         pagination=pagination,
+    )
+
+
+
+
+@reports_bp.get('/reports/shifts')
+@login_required
+def shift_reports_page():
+    agzs_id = request.args.get('agzs_id', type=int)
+    date_from_raw = (request.args.get('date_from') or '').strip()
+    date_to_raw = (request.args.get('date_to') or '').strip()
+
+    date_from, date_from_value = _parse_date_arg(date_from_raw)
+    date_to, date_to_value = _parse_date_arg(date_to_raw)
+
+    query = Shift.query.filter(Shift.is_closed.is_(True)).join(AGZS).order_by(Shift.closed_at.desc(), Shift.id.desc())
+    if agzs_id:
+        query = query.filter(Shift.agzs_id == agzs_id)
+
+    shifts = query.all()
+    filtered = []
+    for s in shifts:
+        closed_dt = s.closed_at or s.opened_at
+        closed_date = closed_dt.date() if closed_dt and hasattr(closed_dt, 'date') else closed_dt
+        if date_from and closed_date and closed_date < date_from:
+            continue
+        if date_to and closed_date and closed_date > date_to:
+            continue
+        filtered.append(s)
+
+    total_shifts = len(filtered)
+    total_talons = sum(int(s.total_talons or 0) for s in filtered)
+    total_liters = sum(float(s.total_liters or 0) for s in filtered)
+    total_amount = sum(float(s.total_amount or 0) for s in filtered)
+
+    agzs_summary_map = {}
+    for s in filtered:
+        agzs_name = s.agzs.name if s.agzs else '—'
+        bucket = agzs_summary_map.setdefault(agzs_name, {
+            'agzs_name': agzs_name,
+            'shifts_count': 0,
+            'total_talons': 0,
+            'total_liters': 0.0,
+            'total_amount': 0.0,
+            'last_closed_at': None,
+        })
+        bucket['shifts_count'] += 1
+        bucket['total_talons'] += int(s.total_talons or 0)
+        bucket['total_liters'] += float(s.total_liters or 0)
+        bucket['total_amount'] += float(s.total_amount or 0)
+        if s.closed_at and (bucket['last_closed_at'] is None or s.closed_at > bucket['last_closed_at']):
+            bucket['last_closed_at'] = s.closed_at
+
+    agzs_summary = sorted(agzs_summary_map.values(), key=lambda x: x['agzs_name'])
+    agzs_list = AGZS.query.order_by(AGZS.name.asc()).all()
+
+    return render_template(
+        'shift_reports.html',
+        shifts=filtered,
+        agzs_list=agzs_list,
+        agzs_summary=agzs_summary,
+        total_shifts=total_shifts,
+        total_talons=total_talons,
+        total_liters=total_liters,
+        total_amount=total_amount,
+        selected_agzs_id=agzs_id,
+        date_from=date_from_value,
+        date_to=date_to_value,
+        format_kz=format_kz,
     )
 
 

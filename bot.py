@@ -412,11 +412,11 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
         if redeem_status == "expired":
-            await update.message.reply_text("❌ Срок действия талона истек")
+            await update.message.reply_text(f"❌ Срок действия талона {talon_display_number(talon)} истек")
             return ConversationHandler.END
 
         if redeem_status == "already_used":
-            await update.message.reply_text("❌ Талон уже использован")
+            await update.message.reply_text(f"❌ Талон {talon_display_number(talon)} уже использован")
             return ConversationHandler.END
 
         if redeem_status != "redeemed":
@@ -433,7 +433,7 @@ async def enter_code_got(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.session.commit()
 
     scan_url = _make_scan_url(app, update.effective_user.id)
-    await update.message.reply_text("✅ Талон принят", reply_markup=_main_keyboard(scan_url))
+    await update.message.reply_text(f"✅ Талон {talon_display_number(talon)} принят", reply_markup=_main_keyboard(scan_url))
     return ConversationHandler.END
 
 

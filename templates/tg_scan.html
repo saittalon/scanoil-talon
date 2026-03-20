@@ -2,7 +2,9 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Сканер талонов</title>
   <style>
     html, body {
@@ -12,6 +14,8 @@
       color: #fff;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
     }
 
     #app {
@@ -33,7 +37,7 @@
       position: fixed;
       left: 12px;
       right: 12px;
-      top: 12px;
+      top: max(12px, env(safe-area-inset-top));
       z-index: 10;
       padding: 14px 18px;
       border-radius: 22px;
@@ -130,7 +134,7 @@
 </head>
 <body>
   <div id="app">
-    <video id="video" playsinline autoplay muted></video>
+    <video id="video" playsinline webkit-playsinline autoplay muted></video>
     <canvas id="canvas"></canvas>
 
     <div id="status" class="topbar">📷 Наведите камеру на QR талона</div>
@@ -144,16 +148,19 @@
     </div>
   </div>
 
-  <audio id="okAudio" preload="auto" playsinline src="{{ url_for('static', filename='scan.wav') }}"></audio>
-  <audio id="errAudio" preload="auto" playsinline src="{{ url_for('static', filename='error.wav') }}"></audio>
+  <audio id="okAudio" preload="auto" playsinline webkit-playsinline src="{{ url_for('static', filename='scan.wav') }}"></audio>
+  <audio id="errAudio" preload="auto" playsinline webkit-playsinline src="{{ url_for('static', filename='error.wav') }}"></audio>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <script>
     const TOKEN = {{ token|tojson }};
     const tg = window.Telegram && Telegram.WebApp ? Telegram.WebApp : null;
     const INIT_DATA = tg && tg.initData ? tg.initData : "";
 
     const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const statusEl = document.getElementById("status");
     const resultEl = document.getElementById("result");
     const resultIconEl = document.getElementById("resultIcon");
@@ -163,6 +170,8 @@
     const errAudio = document.getElementById("errAudio");
     const retryBtn = document.getElementById("retryBtn");
 
+    const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
     let stream = null;
     let detector = null;
     let active = true;
@@ -170,7 +179,15 @@
     let lastCode = "";
     let lastAt = 0;
     let cameraError = false;
+    let scanTimer = null;
+    let monitorTimer = null;
+    let restartTimer = null;
+    let restartInProgress = false;
+    let lastVideoTickAt = 0;
+    let lastVideoTime = 0;
     let audioPrimed = false;
+    let audioCtx = null;
+    let pageVisible = true;
 
     if (tg) {
       tg.ready();
@@ -181,6 +198,24 @@
 
     function setStatus(text) {
       statusEl.textContent = text;
+    }
+
+    function clearTimers() {
+      if (scanTimer) clearTimeout(scanTimer);
+      if (monitorTimer) clearInterval(monitorTimer);
+      if (restartTimer) clearTimeout(restartTimer);
+      scanTimer = null;
+      monitorTimer = null;
+      restartTimer = null;
+    }
+
+    function stopStream() {
+      try {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+      } catch (e) {}
+      stream = null;
+      try { video.pause(); } catch (e) {}
+      try { video.srcObject = null; } catch (e) {}
     }
 
     function vibrate(kind) {
@@ -198,16 +233,44 @@
       } catch (e) {}
     }
 
+    function createAudioContext() {
+      if (audioCtx) return audioCtx;
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      try {
+        audioCtx = new Ctx();
+      } catch (e) {
+        audioCtx = null;
+      }
+      return audioCtx;
+    }
+
+    async function unlockAudioContext() {
+      const ctx = createAudioContext();
+      if (!ctx) return false;
+      try {
+        if (ctx.state !== "running") await ctx.resume();
+        return ctx.state === "running";
+      } catch (e) {
+        return false;
+      }
+    }
+
     async function primeAudio() {
-      if (audioPrimed) return true;
+      if (audioPrimed) {
+        await unlockAudioContext();
+        return true;
+      }
+
+      await unlockAudioContext();
 
       try {
+        okAudio.load();
+        errAudio.load();
         okAudio.muted = true;
         errAudio.muted = true;
         okAudio.volume = 1;
         errAudio.volume = 1;
-        okAudio.preload = "auto";
-        errAudio.preload = "auto";
 
         const p1 = okAudio.play();
         if (p1 && typeof p1.then === "function") {
@@ -234,25 +297,50 @@
       return true;
     }
 
-    function playAudio(el) {
+    function webAudioBeep(kind) {
+      const ctx = createAudioContext();
+      if (!ctx || ctx.state !== "running") return;
+      try {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(kind === "ok" ? 880 : 220, now);
+        if (kind === "error") osc.frequency.linearRampToValueAtTime(160, now + 0.18);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === "ok" ? 0.18 : 0.28));
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + (kind === "ok" ? 0.2 : 0.3));
+      } catch (e) {}
+    }
+
+    async function playAudio(el, kind) {
+      await primeAudio();
       try {
         el.pause();
         el.currentTime = 0;
         el.muted = false;
         el.volume = 1;
         const p = el.play();
-        if (p && typeof p.catch === "function") p.catch(() => {});
-      } catch (e) {}
+        if (p && typeof p.catch === "function") {
+          p.catch(() => webAudioBeep(kind));
+        }
+      } catch (e) {
+        webAudioBeep(kind);
+      }
     }
 
     function playOk() {
       vibrate("ok");
-      playAudio(okAudio);
+      playAudio(okAudio, "ok");
     }
 
     function playErr() {
       vibrate("error");
-      playAudio(errAudio);
+      playAudio(errAudio, "error");
     }
 
     function showResult(kind, text, sub = "", options = {}) {
@@ -260,11 +348,8 @@
       const allowRetry = options.allowRetry === true;
       active = false;
       busy = false;
-
-      try {
-        if (stream) stream.getTracks().forEach(t => t.stop());
-      } catch (e) {}
-      stream = null;
+      clearTimers();
+      stopStream();
 
       resultEl.className = `result show ${kind === "ok" ? "ok" : "error"}`;
       resultIconEl.textContent = kind === "ok" ? "✓" : "✕";
@@ -371,13 +456,50 @@
       }
     }
 
+    function scheduleScan(delay = 160) {
+      if (scanTimer) clearTimeout(scanTimer);
+      if (!active || busy || !pageVisible) return;
+      scanTimer = setTimeout(scanOnce, delay);
+    }
+
+    function detectWithJsQR() {
+      if (!video.videoWidth || !video.videoHeight || !window.jsQR) return null;
+
+      const side = Math.min(video.videoWidth, video.videoHeight, 900);
+      if (!side || side < 120) return null;
+
+      canvas.width = side;
+      canvas.height = side;
+
+      const sx = Math.max(0, (video.videoWidth - side) / 2);
+      const sy = Math.max(0, (video.videoHeight - side) / 2);
+      ctx.drawImage(video, sx, sy, side, side, 0, 0, side, side);
+
+      const imageData = ctx.getImageData(0, 0, side, side);
+      const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "attemptBoth"
+      });
+      return code && code.data ? code.data : null;
+    }
+
     async function scanOnce() {
-      if (!active || busy || !detector || video.readyState < 2) return;
+      if (!active || busy || !pageVisible || !video.videoWidth || video.readyState < 2) {
+        scheduleScan(220);
+        return;
+      }
 
       try {
-        const codes = await detector.detect(video);
-        if (codes && codes.length) {
-          const code = normalizeCode(codes[0].rawValue || "");
+        let raw = null;
+
+        if (detector) {
+          const codes = await detector.detect(video);
+          if (codes && codes.length) raw = codes[0].rawValue || "";
+        }
+
+        if (!raw) raw = detectWithJsQR();
+
+        if (raw) {
+          const code = normalizeCode(raw);
           const now = Date.now();
           if (code && (code !== lastCode || now - lastAt > 2500)) {
             lastCode = code;
@@ -388,31 +510,114 @@
         }
       } catch (e) {}
 
-      if (active && !busy) setTimeout(scanOnce, 180);
+      scheduleScan(IS_IOS ? 220 : 140);
     }
 
-    async function startCamera() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false
-        });
+    function startWatchdog() {
+      if (monitorTimer) clearInterval(monitorTimer);
+      lastVideoTickAt = Date.now();
+      lastVideoTime = video.currentTime || 0;
 
-        video.srcObject = stream;
-        await video.play();
-
-        if (!("BarcodeDetector" in window)) {
-          showResult("error", "Сканер не поддерживается", "Откройте WebApp на другом устройстве");
+      monitorTimer = setInterval(() => {
+        if (!active || busy || !pageVisible) return;
+        if (!stream) {
+          restartCamera("Камера отключилась");
           return;
         }
 
-        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        const tracks = stream.getVideoTracks();
+        if (!tracks.length || tracks.some(t => t.readyState !== "live")) {
+          restartCamera("Камера остановилась");
+          return;
+        }
+
+        const currentTime = video.currentTime || 0;
+        if (currentTime > lastVideoTime + 0.001) {
+          lastVideoTime = currentTime;
+          lastVideoTickAt = Date.now();
+        }
+
+        if (Date.now() - lastVideoTickAt > 9000) {
+          restartCamera("Перезапускаю камеру...");
+        }
+      }, 2000);
+    }
+
+    async function waitForVideoReady(timeoutMs = 8000) {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeoutMs) {
+        if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) return true;
+        await new Promise(r => setTimeout(r, 120));
+      }
+      return false;
+    }
+
+    async function startCamera() {
+      clearTimers();
+      stopStream();
+      cameraError = false;
+      detector = null;
+
+      try {
+        await primeAudio();
+
+        const constraints = {
+          audio: false,
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        video.setAttribute("playsinline", "true");
+        video.setAttribute("webkit-playsinline", "true");
+        video.muted = true;
+
+        try {
+          const p = video.play();
+          if (p && typeof p.then === "function") await p.catch(() => {});
+        } catch (e) {}
+
+        const ready = await waitForVideoReady(IS_IOS ? 10000 : 7000);
+        if (!ready) throw new Error("video_not_ready");
+
+        if ("BarcodeDetector" in window) {
+          try {
+            detector = new BarcodeDetector({ formats: ["qr_code"] });
+          } catch (e) {
+            detector = null;
+          }
+        }
+
         setStatus("📷 Наведите камеру на QR талона");
-        setTimeout(scanOnce, 250);
+        active = true;
+        busy = false;
+        startWatchdog();
+        scheduleScan(250);
       } catch (e) {
         cameraError = true;
         showResult("error", "Камера не работает", "Нажмите «Повторить» или дайте доступ к камере", { autoClose: false, allowRetry: true });
       }
+    }
+
+    function restartCamera(statusText = "Перезапускаю камеру...") {
+      if (restartInProgress || busy || !pageVisible) return;
+      restartInProgress = true;
+      setStatus(statusText);
+      clearTimers();
+      stopStream();
+      restartTimer = setTimeout(async () => {
+        try {
+          active = true;
+          hideResult();
+          await startCamera();
+        } finally {
+          restartInProgress = false;
+        }
+      }, 450);
     }
 
     retryBtn.addEventListener("click", async () => {
@@ -422,28 +627,58 @@
       hideResult();
       setStatus("📷 Наведите камеру на QR талона");
       await primeAudio();
-      startCamera();
+      await startCamera();
+    });
+
+    ["touchstart", "pointerdown", "click"].forEach(evt => {
+      document.addEventListener(evt, () => {
+        primeAudio();
+      }, { passive: true });
     });
 
     document.addEventListener("visibilitychange", async () => {
-      if (document.visibilityState === "visible" && (!stream || cameraError) && !busy) {
-        active = true;
-        hideResult();
+      pageVisible = document.visibilityState === "visible";
+      if (pageVisible) {
         await primeAudio();
-        startCamera();
+        if (!stream || cameraError || restartInProgress || video.readyState < 2) {
+          restartCamera("Возобновляю камеру...");
+        } else {
+          scheduleScan(180);
+        }
+      } else {
+        clearTimers();
+        stopStream();
       }
     });
 
-    window.addEventListener("load", async () => {
+    window.addEventListener("focus", async () => {
+      pageVisible = true;
       await primeAudio();
-      startCamera();
+      if (!stream && !busy) restartCamera("Возобновляю камеру...");
+    });
+
+    window.addEventListener("pageshow", async () => {
+      pageVisible = true;
+      await primeAudio();
+      if (!stream && !busy) restartCamera("Возобновляю камеру...");
+    });
+
+    window.addEventListener("pagehide", () => {
+      pageVisible = false;
+      clearTimers();
+      stopStream();
     });
 
     window.addEventListener("beforeunload", () => {
       active = false;
-      try {
-        if (stream) stream.getTracks().forEach(t => t.stop());
-      } catch (e) {}
+      pageVisible = false;
+      clearTimers();
+      stopStream();
+    });
+
+    window.addEventListener("load", async () => {
+      await primeAudio();
+      await startCamera();
     });
   </script>
 </body>

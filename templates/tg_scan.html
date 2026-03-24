@@ -188,6 +188,9 @@
     let audioPrimed = false;
     let audioCtx = null;
     let pageVisible = true;
+    let cameraStartPromise = null;
+    let cameraInitialized = false;
+    let pageWasHidden = false;
 
     if (tg) {
       tg.ready();
@@ -295,6 +298,11 @@
       errAudio.volume = 1;
       audioPrimed = true;
       return true;
+    }
+
+    function initAudioOnce() {
+      if (audioPrimed) return;
+      primeAudio().catch(() => {});
     }
 
     function webAudioBeep(kind) {
@@ -552,55 +560,66 @@
       return false;
     }
 
-    async function startCamera() {
-      clearTimers();
-      stopStream();
-      cameraError = false;
-      detector = null;
+    async function startCamera(forceRestart = false) {
+      if (cameraStartPromise) return cameraStartPromise;
 
-      try {
-        await primeAudio();
-
-        const constraints = {
-          audio: false,
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        };
-
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        video.setAttribute("playsinline", "true");
-        video.setAttribute("webkit-playsinline", "true");
-        video.muted = true;
+      cameraStartPromise = (async () => {
+        clearTimers();
+        if (forceRestart || !stream) stopStream();
+        cameraError = false;
+        detector = null;
 
         try {
-          const p = video.play();
-          if (p && typeof p.then === "function") await p.catch(() => {});
-        } catch (e) {}
+          const constraints = {
+            audio: false,
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          };
 
-        const ready = await waitForVideoReady(IS_IOS ? 10000 : 7000);
-        if (!ready) throw new Error("video_not_ready");
-
-        if ("BarcodeDetector" in window) {
-          try {
-            detector = new BarcodeDetector({ formats: ["qr_code"] });
-          } catch (e) {
-            detector = null;
+          if (!stream || forceRestart) {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            cameraInitialized = true;
           }
-        }
 
-        setStatus("📷 Наведите камеру на QR талона");
-        active = true;
-        busy = false;
-        startWatchdog();
-        scheduleScan(250);
-      } catch (e) {
-        cameraError = true;
-        showResult("error", "Камера не работает", "Нажмите «Повторить» или дайте доступ к камере", { autoClose: false, allowRetry: true });
-      }
+          video.srcObject = stream;
+          video.setAttribute("playsinline", "true");
+          video.setAttribute("webkit-playsinline", "true");
+          video.muted = true;
+
+          try {
+            const p = video.play();
+            if (p && typeof p.then === "function") await p.catch(() => {});
+          } catch (e) {}
+
+          const ready = await waitForVideoReady(IS_IOS ? 10000 : 7000);
+          if (!ready) throw new Error("video_not_ready");
+
+          if ("BarcodeDetector" in window) {
+            try {
+              detector = new BarcodeDetector({ formats: ["qr_code"] });
+            } catch (e) {
+              detector = null;
+            }
+          }
+
+          setStatus("📷 Наведите камеру на QR талона");
+          active = true;
+          busy = false;
+          cameraError = false;
+          startWatchdog();
+          scheduleScan(250);
+        } catch (e) {
+          cameraError = true;
+          showResult("error", "Камера не работает", "Нажмите «Повторить» или дайте доступ к камере", { autoClose: false, allowRetry: true });
+        } finally {
+          cameraStartPromise = null;
+        }
+      })();
+
+      return cameraStartPromise;
     }
 
     function restartCamera(statusText = "Перезапускаю камеру...") {
@@ -613,7 +632,7 @@
         try {
           active = true;
           hideResult();
-          await startCamera();
+          await startCamera(true);
         } finally {
           restartInProgress = false;
         }
@@ -626,41 +645,47 @@
       busy = false;
       hideResult();
       setStatus("📷 Наведите камеру на QR талона");
-      await primeAudio();
-      await startCamera();
+      initAudioOnce();
+      await startCamera(true);
     });
 
     ["touchstart", "pointerdown", "click"].forEach(evt => {
       document.addEventListener(evt, () => {
-        primeAudio();
+        initAudioOnce();
       }, { passive: true });
     });
 
-    document.addEventListener("visibilitychange", async () => {
+    document.addEventListener("visibilitychange", () => {
       pageVisible = document.visibilityState === "visible";
       if (pageVisible) {
-        await primeAudio();
-        if (!stream || cameraError || restartInProgress || video.readyState < 2) {
+        initAudioOnce();
+        if (pageWasHidden && (!stream || cameraError || restartInProgress || video.readyState < 2)) {
           restartCamera("Возобновляю камеру...");
         } else {
           scheduleScan(180);
         }
+        pageWasHidden = false;
       } else {
+        pageWasHidden = true;
         clearTimers();
         stopStream();
       }
     });
 
-    window.addEventListener("focus", async () => {
+    window.addEventListener("focus", () => {
       pageVisible = true;
-      await primeAudio();
-      if (!stream && !busy) restartCamera("Возобновляю камеру...");
+      initAudioOnce();
+      if (cameraInitialized && !stream && !busy && !restartInProgress) {
+        restartCamera("Возобновляю камеру...");
+      }
     });
 
-    window.addEventListener("pageshow", async () => {
+    window.addEventListener("pageshow", () => {
       pageVisible = true;
-      await primeAudio();
-      if (!stream && !busy) restartCamera("Возобновляю камеру...");
+      initAudioOnce();
+      if (cameraInitialized && !stream && !busy && !restartInProgress) {
+        restartCamera("Возобновляю камеру...");
+      }
     });
 
     window.addEventListener("pagehide", () => {
@@ -677,8 +702,8 @@
     });
 
     window.addEventListener("load", async () => {
-      await primeAudio();
-      await startCamera();
+      initAudioOnce();
+      await startCamera(true);
     });
   </script>
 </body>

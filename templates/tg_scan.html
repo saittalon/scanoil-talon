@@ -182,12 +182,10 @@
     let scanTimer = null;
     let audioPrimed = false;
     let audioCtx = null;
-    let startInFlight = null;
-    let permissionRequested = false;
-    let permissionResolved = false;
     let pageVisible = document.visibilityState === "visible";
-    let canAutoResume = false;
-    let everStartedSuccessfully = false;
+    let cameraStartPromise = null;
+    let permissionRequested = false;
+    let hasStartedCamera = false;
 
     if (tg) {
       tg.ready();
@@ -200,7 +198,7 @@
       statusEl.textContent = text;
     }
 
-    function clearScanTimer() {
+    function clearTimers() {
       if (scanTimer) clearTimeout(scanTimer);
       scanTimer = null;
     }
@@ -233,11 +231,7 @@
       if (audioCtx) return audioCtx;
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return null;
-      try {
-        audioCtx = new Ctx();
-      } catch (e) {
-        audioCtx = null;
-      }
+      try { audioCtx = new Ctx(); } catch (e) { audioCtx = null; }
       return audioCtx;
     }
 
@@ -263,32 +257,8 @@
       try {
         okAudio.load();
         errAudio.load();
-        okAudio.muted = true;
-        errAudio.muted = true;
-        okAudio.volume = 1;
-        errAudio.volume = 1;
-
-        const p1 = okAudio.play();
-        if (p1 && typeof p1.then === "function") {
-          await p1.then(() => {
-            okAudio.pause();
-            okAudio.currentTime = 0;
-          }).catch(() => {});
-        }
-
-        const p2 = errAudio.play();
-        if (p2 && typeof p2.then === "function") {
-          await p2.then(() => {
-            errAudio.pause();
-            errAudio.currentTime = 0;
-          }).catch(() => {});
-        }
       } catch (e) {}
 
-      okAudio.muted = false;
-      errAudio.muted = false;
-      okAudio.volume = 1;
-      errAudio.volume = 1;
       audioPrimed = true;
       return true;
     }
@@ -326,9 +296,7 @@
         el.muted = false;
         el.volume = 1;
         const p = el.play();
-        if (p && typeof p.catch === "function") {
-          p.catch(() => webAudioBeep(kind));
-        }
+        if (p && typeof p.catch === "function") p.catch(() => webAudioBeep(kind));
       } catch (e) {
         webAudioBeep(kind);
       }
@@ -344,21 +312,13 @@
       playAudio(errAudio, "error");
     }
 
-    function hideResult() {
-      resultEl.className = "result";
-      resultTextEl.textContent = "";
-      resultSubEl.textContent = "";
-      retryBtn.style.display = "none";
-    }
-
     function showResult(kind, text, sub = "", options = {}) {
       const autoClose = options.autoClose !== false;
       const allowRetry = options.allowRetry === true;
       active = false;
       busy = false;
-      clearScanTimer();
+      clearTimers();
       stopStream();
-      canAutoResume = false;
 
       resultEl.className = `result show ${kind === "ok" ? "ok" : "error"}`;
       resultIconEl.textContent = kind === "ok" ? "✓" : "✕";
@@ -397,6 +357,13 @@
       return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
     }
 
+    function hideResult() {
+      resultEl.className = "result";
+      resultTextEl.textContent = "";
+      resultSubEl.textContent = "";
+      retryBtn.style.display = "none";
+    }
+
     function displayTalonNumber(data, fallbackCode = "") {
       const value = (data && (data.talon_number || data.code || data.serial)) || fallbackCode || "";
       const digits = String(value).replace(/\D+/g, "");
@@ -416,25 +383,19 @@
         const res = await fetch("/tg/api/scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token: TOKEN,
-            code,
-            initData: INIT_DATA
-          })
+          body: JSON.stringify({ token: TOKEN, code, initData: INIT_DATA })
         });
 
         const data = await res.json().catch(() => ({ ok: false, error: "bad_json" }));
 
         if (res.ok && data.ok) {
-          const sub = (data.used_at_text || "") + (data.agzs ? "
-АГЗС: " + data.agzs : "");
+          const sub = (data.used_at_text || "") + (data.agzs ? "\nАГЗС: " + data.agzs : "");
           showResult("ok", `Талон ${displayTalonNumber(data, code)} принят`, sub);
           return;
         }
 
         if (data.error === "already_used") {
-          const sub = (data.used_at_text || "") + (data.agzs ? "
-АГЗС: " + data.agzs : "");
+          const sub = (data.used_at_text || "") + (data.agzs ? "\nАГЗС: " + data.agzs : "");
           showResult("error", `Талон ${displayTalonNumber(data, code)} уже использован`, sub);
           return;
         }
@@ -461,7 +422,7 @@
     }
 
     function scheduleScan(delay = 160) {
-      clearScanTimer();
+      if (scanTimer) clearTimeout(scanTimer);
       if (!active || busy || !pageVisible || !stream) return;
       scanTimer = setTimeout(scanOnce, delay);
     }
@@ -517,77 +478,77 @@
       scheduleScan(IS_IOS ? 220 : 140);
     }
 
-    async function waitForVideoReady(timeoutMs = 8000) {
+    async function waitForVideoReady(timeoutMs = 12000) {
       const startedAt = Date.now();
+
       while (Date.now() - startedAt < timeoutMs) {
         if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) return true;
-        await new Promise(r => setTimeout(r, 120));
+
+        try {
+          const p = video.play();
+          if (p && typeof p.catch === "function") await p.catch(() => {});
+        } catch (e) {}
+
+        await new Promise(r => setTimeout(r, 150));
       }
+
       return false;
     }
 
-    async function startCamera(options = {}) {
-      const forceRestart = options.forceRestart === true;
-      const isManual = options.manual === true;
+    async function startCamera(forceRestart = false) {
+      if (cameraStartPromise) return cameraStartPromise;
 
-      if (startInFlight) return startInFlight;
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        showResult("error", "Камера не поддерживается", "Откройте страницу в браузере с доступом к камере", { autoClose: false, allowRetry: true });
-        return;
-      }
+      cameraStartPromise = (async () => {
+        clearTimers();
+        cameraError = false;
+        detector = null;
 
-      startInFlight = (async () => {
         try {
-          clearScanTimer();
-          hideResult();
-          cameraError = false;
-          detector = null;
-          active = true;
-          busy = false;
-          setStatus("📷 Открываю камеру...");
-
           if (forceRestart) stopStream();
-          if (stream) {
-            try {
-              video.srcObject = stream;
-              const existingPlay = video.play();
-              if (existingPlay && typeof existingPlay.then === "function") await existingPlay.catch(() => {});
-              scheduleScan(220);
-              setStatus("📷 Наведите камеру на QR талона");
-              canAutoResume = true;
-              return;
-            } catch (e) {
-              stopStream();
+
+          const constraintsList = [
+            {
+              audio: false,
+              video: {
+                facingMode: { ideal: "environment" },
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+              }
+            },
+            {
+              audio: false,
+              video: {
+                facingMode: "environment"
+              }
+            },
+            {
+              audio: false,
+              video: true
             }
+          ];
+
+          if (!stream) {
+            permissionRequested = true;
+            let lastErr = null;
+            for (const constraints of constraintsList) {
+              try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                break;
+              } catch (e) {
+                lastErr = e;
+              }
+            }
+            if (!stream) throw lastErr || new Error("camera_failed");
           }
 
-          permissionRequested = true;
-          const constraints = {
-            audio: false,
-            video: {
-              facingMode: { ideal: "environment" },
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
-            }
-          };
-
-          const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-          permissionResolved = true;
-          stream = newStream;
-          everStartedSuccessfully = true;
-          canAutoResume = true;
-
           video.srcObject = stream;
+          video.muted = true;
+          video.autoplay = true;
+          video.setAttribute("autoplay", "true");
           video.setAttribute("playsinline", "true");
           video.setAttribute("webkit-playsinline", "true");
-          video.muted = true;
 
-          try {
-            const p = video.play();
-            if (p && typeof p.then === "function") await p.catch(() => {});
-          } catch (e) {}
-
-          const ready = await waitForVideoReady(IS_IOS ? 10000 : 7000);
+          const ready = await waitForVideoReady(IS_IOS ? 14000 : 12000);
           if (!ready) throw new Error("video_not_ready");
 
           if ("BarcodeDetector" in window) {
@@ -598,31 +559,38 @@
             }
           }
 
+          hasStartedCamera = true;
           setStatus("📷 Наведите камеру на QR талона");
+          active = true;
+          busy = false;
+          cameraError = false;
+          hideResult();
           scheduleScan(250);
         } catch (e) {
-          permissionResolved = true;
           cameraError = true;
-          canAutoResume = false;
-          stopStream();
-          const isDenied = e && (e.name === "NotAllowedError" || e.name === "PermissionDeniedError" || e.name === "SecurityError");
+          const denied = e && (e.name === "NotAllowedError" || e.name === "PermissionDeniedError" || e.name === "SecurityError");
           showResult(
             "error",
-            isDenied ? "Нет доступа к камере" : "Камера не работает",
-            isDenied ? "Разрешите доступ к камере и нажмите «Повторить»" : "Нажмите «Повторить»",
+            denied ? "Нет доступа к камере" : "Камера не работает",
+            denied ? "Разрешите доступ к камере и нажмите «Повторить»" : "Нажмите «Повторить»",
             { autoClose: false, allowRetry: true }
           );
         } finally {
-          startInFlight = null;
+          cameraStartPromise = null;
         }
       })();
 
-      return startInFlight;
+      return cameraStartPromise;
     }
 
     retryBtn.addEventListener("click", async () => {
+      cameraError = false;
+      active = true;
+      busy = false;
+      hideResult();
+      setStatus("📷 Наведите камеру на QR талона");
       initAudioOnce();
-      await startCamera({ forceRestart: true, manual: true });
+      await startCamera(true);
     });
 
     ["touchstart", "pointerdown", "click"].forEach(evt => {
@@ -631,51 +599,40 @@
       }, { passive: true });
     });
 
-    document.addEventListener("visibilitychange", () => {
+    document.addEventListener("visibilitychange", async () => {
       pageVisible = document.visibilityState === "visible";
+      if (pageVisible) {
+        initAudioOnce();
 
-      if (!pageVisible) {
-        clearScanTimer();
-        return;
+        if (stream) {
+          try {
+            const p = video.play();
+            if (p && typeof p.catch === "function") await p.catch(() => {});
+          } catch (e) {}
+          if (active && !busy) scheduleScan(180);
+        } else if (hasStartedCamera && !cameraError && !busy) {
+          await startCamera(false);
+        }
+      } else {
+        clearTimers();
       }
-
-      initAudioOnce();
-
-      if (stream && active && !busy) {
-        scheduleScan(180);
-        return;
-      }
-
-      if (!permissionResolved) {
-        return;
-      }
-
-      if (everStartedSuccessfully && canAutoResume && !cameraError && !busy && !stream) {
-        startCamera({ forceRestart: false, manual: false }).catch(() => {});
-      }
-    });
-
-    window.addEventListener("focus", () => {
-      pageVisible = true;
-      initAudioOnce();
-      if (stream && active && !busy) scheduleScan(180);
     });
 
     window.addEventListener("pagehide", () => {
-      pageVisible = false;
-      clearScanTimer();
+      clearTimers();
     });
 
     window.addEventListener("beforeunload", () => {
       active = false;
       pageVisible = false;
-      clearScanTimer();
+      clearTimers();
       stopStream();
     });
 
     window.addEventListener("load", async () => {
       initAudioOnce();
-      await startCamera({ forceRestart: false, manual: false });
+      setStatus("📷 Открываю камеру...");
+      await startCamera(false);
     });
   </script>
 </body>

@@ -17,51 +17,119 @@
       overscroll-behavior: none;
       -webkit-tap-highlight-color: transparent;
     }
-    #app, #video { position: fixed; inset: 0; }
-    #app { background: #000; }
+
+    #app {
+      position: fixed;
+      inset: 0;
+      background: #000;
+    }
+
     #video {
-      width: 100%; height: 100%; object-fit: cover; background: #000;
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
     }
+
     .topbar {
-      position: fixed; left: 12px; right: 12px; top: max(12px, env(safe-area-inset-top));
-      z-index: 10; padding: 14px 18px; border-radius: 22px;
-      background: rgba(9,22,67,.88); border: 1px solid rgba(255,255,255,.12);
-      font-size: 18px; font-weight: 700; backdrop-filter: blur(10px);
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      top: max(12px, env(safe-area-inset-top));
+      z-index: 10;
+      padding: 14px 18px;
+      border-radius: 22px;
+      background: rgba(9, 22, 67, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      font-size: 18px;
+      font-weight: 700;
+      backdrop-filter: blur(10px);
     }
+
     .frame {
-      position: fixed; left: 50%; top: 50%; width: min(72vw, 320px); height: min(72vw, 320px);
-      transform: translate(-50%, -42%); border: 6px solid rgba(255,255,255,.96); border-radius: 28px;
-      box-shadow: 0 0 0 9999px rgba(0,0,0,.34); z-index: 8; pointer-events: none;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      width: min(72vw, 320px);
+      height: min(72vw, 320px);
+      transform: translate(-50%, -42%);
+      border: 6px solid rgba(255, 255, 255, 0.96);
+      border-radius: 28px;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.34);
+      z-index: 8;
+      pointer-events: none;
     }
+
     .result {
-      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-      flex-direction: column; z-index: 20; opacity: 0; pointer-events: none; transition: opacity .18s ease;
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 20;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .18s ease;
     }
-    .result.show { opacity: 1; pointer-events: auto; }
-    .result.ok { background: rgba(19,153,81,.92); }
-    .result.error { background: rgba(190,37,37,.92); }
-    .icon { font-size: 180px; line-height: 1; margin-bottom: 18px; }
-    .text { font-size: 26px; font-weight: 800; text-align: center; padding: 0 24px; }
+
+    .result.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .result.ok {
+      background: rgba(19, 153, 81, 0.92);
+    }
+
+    .result.error {
+      background: rgba(190, 37, 37, 0.92);
+    }
+
+    .icon {
+      font-size: 180px;
+      line-height: 1;
+      margin-bottom: 18px;
+    }
+
+    .text {
+      font-size: 26px;
+      font-weight: 800;
+      text-align: center;
+      padding: 0 24px;
+    }
+
     .sub {
-      font-size: 17px; margin-top: 10px; text-align: center; padding: 0 24px;
-      opacity: .95; max-width: 720px; white-space: pre-line;
+      font-size: 17px;
+      margin-top: 10px;
+      text-align: center;
+      padding: 0 24px;
+      opacity: 0.95;
+      max-width: 720px;
+      white-space: pre-line;
     }
+
+    canvas {
+      display: none;
+    }
+
     .retry-btn {
-      margin-top: 18px; border: 0; border-radius: 14px; padding: 12px 18px;
-      font-size: 16px; font-weight: 800; background: rgba(255,255,255,.95); color: #08102a; display: none;
+      margin-top: 18px;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 18px;
+      font-size: 16px;
+      font-weight: 800;
+      background: rgba(255,255,255,.95);
+      color: #08102a;
+      display: none;
     }
-    .result.show .retry-btn { display: inline-block; }
-    .unlock {
-      position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom));
-      z-index: 30; padding: 12px 14px; border-radius: 16px; background: rgba(0,0,0,.72);
-      border: 1px solid rgba(255,255,255,.12); display: none; align-items: center; gap: 10px;
+
+    .result.show .retry-btn {
+      display: inline-block;
     }
-    .unlock.show { display: flex; }
-    .unlock button {
-      border: 0; border-radius: 12px; padding: 10px 14px; font-weight: 800;
-      background: #fff; color: #08102a;
-    }
-    canvas { display:none; }
   </style>
 </head>
 <body>
@@ -77,11 +145,6 @@
       <div id="resultText" class="text"></div>
       <div id="resultSub" class="sub"></div>
       <button id="retryBtn" class="retry-btn" type="button">Повторить</button>
-    </div>
-
-    <div id="unlockBox" class="unlock">
-      <div style="flex:1">Нажмите один раз, чтобы включить звук</div>
-      <button id="unlockBtn" type="button">Включить звук</button>
     </div>
   </div>
 
@@ -106,27 +169,25 @@
     const okAudio = document.getElementById("okAudio");
     const errAudio = document.getElementById("errAudio");
     const retryBtn = document.getElementById("retryBtn");
-    const unlockBox = document.getElementById("unlockBox");
-    const unlockBtn = document.getElementById("unlockBtn");
 
     const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
     let stream = null;
     let detector = null;
-    let scanTimer = null;
-    let monitorTimer = null;
+    let active = true;
     let busy = false;
-    let active = false;
     let lastCode = "";
     let lastAt = 0;
-    let cameraStartPromise = null;
+    let cameraError = false;
+    let scanTimer = null;
+    let audioPrimed = false;
     let audioCtx = null;
-    let audioUnlocked = false;
-    let audioWarned = false;
-    let closing = false;
+    let startInFlight = null;
+    let permissionRequested = false;
+    let permissionResolved = false;
     let pageVisible = document.visibilityState === "visible";
-    let lastVideoTickAt = 0;
-    let lastVideoTime = 0;
+    let canAutoResume = false;
+    let everStartedSuccessfully = false;
 
     if (tg) {
       tg.ready();
@@ -135,19 +196,16 @@
       try { tg.BackButton.hide(); } catch (e) {}
     }
 
-    function setStatus(text) { statusEl.textContent = text; }
-
-    function clearTimers() {
-      if (scanTimer) clearTimeout(scanTimer);
-      if (monitorTimer) clearInterval(monitorTimer);
-      scanTimer = null;
-      monitorTimer = null;
+    function setStatus(text) {
+      statusEl.textContent = text;
     }
 
-    function stopStream(full = true) {
-      clearTimers();
-      active = false;
-      if (!full) return;
+    function clearScanTimer() {
+      if (scanTimer) clearTimeout(scanTimer);
+      scanTimer = null;
+    }
+
+    function stopStream() {
       try {
         if (stream) stream.getTracks().forEach(t => t.stop());
       } catch (e) {}
@@ -156,91 +214,119 @@
       try { video.srcObject = null; } catch (e) {}
     }
 
-    function ensureAudioCtx() {
-      if (audioCtx) return audioCtx;
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return null;
-      try { audioCtx = new Ctx(); } catch (e) { audioCtx = null; }
-      return audioCtx;
-    }
-
-    async function unlockAudio() {
-      const ctx = ensureAudioCtx();
-      if (!ctx) return false;
+    function vibrate(kind) {
       try {
-        if (ctx.state !== 'running') await ctx.resume();
+        if (tg && tg.HapticFeedback) {
+          if (kind === "ok") tg.HapticFeedback.notificationOccurred("success");
+          else tg.HapticFeedback.notificationOccurred("error");
+        }
       } catch (e) {}
 
       try {
+        if (navigator.vibrate) {
+          navigator.vibrate(kind === "ok" ? [120, 50, 120] : [220, 80, 220]);
+        }
+      } catch (e) {}
+    }
+
+    function createAudioContext() {
+      if (audioCtx) return audioCtx;
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      try {
+        audioCtx = new Ctx();
+      } catch (e) {
+        audioCtx = null;
+      }
+      return audioCtx;
+    }
+
+    async function unlockAudioContext() {
+      const ctx = createAudioContext();
+      if (!ctx) return false;
+      try {
+        if (ctx.state !== "running") await ctx.resume();
+        return ctx.state === "running";
+      } catch (e) {
+        return false;
+      }
+    }
+
+    async function primeAudio() {
+      if (audioPrimed) {
+        await unlockAudioContext();
+        return true;
+      }
+
+      await unlockAudioContext();
+
+      try {
+        okAudio.load();
+        errAudio.load();
         okAudio.muted = true;
         errAudio.muted = true;
-        okAudio.currentTime = 0;
-        errAudio.currentTime = 0;
-        await Promise.allSettled([okAudio.play(), errAudio.play()]);
-        okAudio.pause(); errAudio.pause();
-        okAudio.currentTime = 0; errAudio.currentTime = 0;
+        okAudio.volume = 1;
+        errAudio.volume = 1;
+
+        const p1 = okAudio.play();
+        if (p1 && typeof p1.then === "function") {
+          await p1.then(() => {
+            okAudio.pause();
+            okAudio.currentTime = 0;
+          }).catch(() => {});
+        }
+
+        const p2 = errAudio.play();
+        if (p2 && typeof p2.then === "function") {
+          await p2.then(() => {
+            errAudio.pause();
+            errAudio.currentTime = 0;
+          }).catch(() => {});
+        }
       } catch (e) {}
 
       okAudio.muted = false;
       errAudio.muted = false;
       okAudio.volume = 1;
       errAudio.volume = 1;
-      audioUnlocked = !!ctx && ctx.state === 'running';
-      if (audioUnlocked) unlockBox.classList.remove('show');
-      return audioUnlocked;
+      audioPrimed = true;
+      return true;
     }
 
-    function showUnlockHint() {
-      if (audioUnlocked || audioWarned) return;
-      audioWarned = true;
-      unlockBox.classList.add('show');
-    }
-
-    function vibrate(kind) {
-      try {
-        if (tg && tg.HapticFeedback) {
-          if (kind === 'ok') tg.HapticFeedback.notificationOccurred('success');
-          else tg.HapticFeedback.notificationOccurred('error');
-        }
-      } catch (e) {}
-      try {
-        if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? [120, 50, 120] : [220, 80, 220]);
-      } catch (e) {}
+    function initAudioOnce() {
+      if (audioPrimed) return;
+      primeAudio().catch(() => {});
     }
 
     function webAudioBeep(kind) {
-      const ctx = ensureAudioCtx();
-      if (!ctx || ctx.state !== 'running') {
-        showUnlockHint();
-        return;
-      }
+      const ctx = createAudioContext();
+      if (!ctx || ctx.state !== "running") return;
       try {
         const now = ctx.currentTime;
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(kind === 'ok' ? 880 : 220, now);
-        if (kind === 'error') osc.frequency.linearRampToValueAtTime(150, now + 0.18);
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(kind === "ok" ? 880 : 220, now);
+        if (kind === "error") osc.frequency.linearRampToValueAtTime(160, now + 0.18);
         gain.gain.setValueAtTime(0.0001, now);
         gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === 'ok' ? 0.18 : 0.30));
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === "ok" ? 0.18 : 0.28));
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start(now);
-        osc.stop(now + (kind === 'ok' ? 0.20 : 0.32));
+        osc.stop(now + (kind === "ok" ? 0.2 : 0.3));
       } catch (e) {}
     }
 
     async function playAudio(el, kind) {
-      vibrate(kind);
+      await primeAudio();
       try {
-        await unlockAudio();
         el.pause();
         el.currentTime = 0;
         el.muted = false;
         el.volume = 1;
         const p = el.play();
-        if (p && typeof p.catch === 'function') {
+        if (p && typeof p.catch === "function") {
           p.catch(() => webAudioBeep(kind));
         }
       } catch (e) {
@@ -248,62 +334,74 @@
       }
     }
 
-    function playOk() { playAudio(okAudio, 'ok'); }
-    function playErr() { playAudio(errAudio, 'error'); }
-
-    function hideResult() {
-      resultEl.className = 'result';
-      resultTextEl.textContent = '';
-      resultSubEl.textContent = '';
-      retryBtn.style.display = 'none';
+    function playOk() {
+      vibrate("ok");
+      playAudio(okAudio, "ok");
     }
 
-    function showResult(kind, text, sub = '', options = {}) {
+    function playErr() {
+      vibrate("error");
+      playAudio(errAudio, "error");
+    }
+
+    function hideResult() {
+      resultEl.className = "result";
+      resultTextEl.textContent = "";
+      resultSubEl.textContent = "";
+      retryBtn.style.display = "none";
+    }
+
+    function showResult(kind, text, sub = "", options = {}) {
       const autoClose = options.autoClose !== false;
       const allowRetry = options.allowRetry === true;
       active = false;
       busy = false;
-      clearTimers();
+      clearScanTimer();
+      stopStream();
+      canAutoResume = false;
 
-      resultEl.className = `result show ${kind === 'ok' ? 'ok' : 'error'}`;
-      resultIconEl.textContent = kind === 'ok' ? '✓' : '✕';
+      resultEl.className = `result show ${kind === "ok" ? "ok" : "error"}`;
+      resultIconEl.textContent = kind === "ok" ? "✓" : "✕";
       resultTextEl.textContent = text;
-      resultSubEl.textContent = sub || '';
-      retryBtn.style.display = allowRetry ? 'inline-block' : 'none';
+      resultSubEl.textContent = sub || "";
+      retryBtn.style.display = allowRetry ? "inline-block" : "none";
 
-      if (kind === 'ok') playOk(); else playErr();
+      if (kind === "ok") playOk();
+      else playErr();
 
       if (autoClose) {
         setTimeout(() => {
           try {
-            closing = true;
-            if (tg) tg.close(); else window.close();
+            if (tg) tg.close();
+            else window.close();
           } catch (e) {}
         }, 2500);
       }
     }
 
     function normalizeCode(raw) {
-      let code = String(raw || '').trim();
+      let code = String(raw || "").trim();
+
       try {
         const u = new URL(code);
-        code = u.searchParams.get('code') || u.searchParams.get('talon') || u.searchParams.get('id') || code;
+        code = u.searchParams.get("code") || u.searchParams.get("talon") || u.searchParams.get("id") || code;
       } catch (e) {}
+
       const m = code.match(/(\d{6,})/);
       return m ? m[1] : code;
     }
 
     function fmtDate(s) {
-      if (!s) return '—';
+      if (!s) return "—";
       const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
       return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
     }
 
-    function displayTalonNumber(data, fallbackCode = '') {
-      const value = (data && (data.talon_number || data.code || data.serial)) || fallbackCode || '';
-      const digits = String(value).replace(/\D+/g, '');
-      if (!digits) return String(value || fallbackCode || '—');
-      return digits.match(/.{1,3}/g).join(' ');
+    function displayTalonNumber(data, fallbackCode = "") {
+      const value = (data && (data.talon_number || data.code || data.serial)) || fallbackCode || "";
+      const digits = String(value).replace(/\D+/g, "");
+      if (!digits) return String(value || fallbackCode || "—");
+      return digits.match(/.{1,3}/g).join(" ");
     }
 
     async function submitCode(rawCode) {
@@ -312,78 +410,98 @@
 
       busy = true;
       hideResult();
-      setStatus('⏳ Проверяю талон...');
+      setStatus("⏳ Проверяю талон...");
 
       try {
-        const res = await fetch('/tg/api/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: TOKEN, code, initData: INIT_DATA })
+        const res = await fetch("/tg/api/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token: TOKEN,
+            code,
+            initData: INIT_DATA
+          })
         });
 
-        const data = await res.json().catch(() => ({ ok: false, error: 'bad_json' }));
+        const data = await res.json().catch(() => ({ ok: false, error: "bad_json" }));
 
         if (res.ok && data.ok) {
-          const sub = (data.used_at_text || '') + (data.agzs ? '\nАГЗС: ' + data.agzs : '');
-          showResult('ok', `Талон ${displayTalonNumber(data, code)} принят`, sub);
+          const sub = (data.used_at_text || "") + (data.agzs ? "
+АГЗС: " + data.agzs : "");
+          showResult("ok", `Талон ${displayTalonNumber(data, code)} принят`, sub);
           return;
         }
-        if (data.error === 'already_used') {
-          const sub = (data.used_at_text || '') + (data.agzs ? '\nАГЗС: ' + data.agzs : '');
-          showResult('error', `Талон ${displayTalonNumber(data, code)} уже использован`, sub);
+
+        if (data.error === "already_used") {
+          const sub = (data.used_at_text || "") + (data.agzs ? "
+АГЗС: " + data.agzs : "");
+          showResult("error", `Талон ${displayTalonNumber(data, code)} уже использован`, sub);
           return;
         }
-        if (data.error === 'expired') {
-          showResult('error', 'Срок действия талона истёк', `Срок действия: ${fmtDate(data.valid_from)} — ${fmtDate(data.valid_to)}`);
+
+        if (data.error === "expired") {
+          showResult("error", "Срок действия талона истёк", `Срок действия: ${fmtDate(data.valid_from)} — ${fmtDate(data.valid_to)}`);
           return;
         }
-        if (data.error === 'talon_not_found') {
-          showResult('error', `Талон ${code} не найден`);
+
+        if (data.error === "talon_not_found") {
+          showResult("error", `Талон ${code} не найден`);
           return;
         }
-        if (data.error === 'token_expired' || data.error === 'not_logged_in') {
-          showResult('error', 'Сессия истекла', 'Нажмите сканировать заново в Telegram', { autoClose: false, allowRetry: true });
+
+        if (data.error === "token_expired" || data.error === "not_logged_in") {
+          showResult("error", "Сессия истекла", "Нажмите сканировать заново в Telegram", { autoClose: false, allowRetry: true });
           return;
         }
-        showResult('error', 'Ошибка проверки талона', 'Попробуйте отсканировать ещё раз', { autoClose: false, allowRetry: true });
+
+        showResult("error", "Ошибка проверки талона", "Попробуйте отсканировать ещё раз", { autoClose: false, allowRetry: true });
       } catch (e) {
-        showResult('error', 'Ошибка сети', 'Попробуйте ещё раз', { autoClose: false, allowRetry: true });
+        showResult("error", "Ошибка сети", "Попробуйте ещё раз", { autoClose: false, allowRetry: true });
       }
     }
 
     function scheduleScan(delay = 160) {
-      if (scanTimer) clearTimeout(scanTimer);
+      clearScanTimer();
       if (!active || busy || !pageVisible || !stream) return;
       scanTimer = setTimeout(scanOnce, delay);
     }
 
     function detectWithJsQR() {
       if (!video.videoWidth || !video.videoHeight || !window.jsQR) return null;
+
       const side = Math.min(video.videoWidth, video.videoHeight, 900);
       if (!side || side < 120) return null;
 
       canvas.width = side;
       canvas.height = side;
+
       const sx = Math.max(0, (video.videoWidth - side) / 2);
       const sy = Math.max(0, (video.videoHeight - side) / 2);
       ctx.drawImage(video, sx, sy, side, side, 0, 0, side, side);
+
       const imageData = ctx.getImageData(0, 0, side, side);
-      const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+      const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "attemptBoth"
+      });
       return code && code.data ? code.data : null;
     }
 
     async function scanOnce() {
-      if (!active || busy || !pageVisible || !stream || video.readyState < 2 || !video.videoWidth) {
+      if (!active || busy || !pageVisible || !stream || !video.videoWidth || video.readyState < 2) {
         scheduleScan(220);
         return;
       }
+
       try {
         let raw = null;
+
         if (detector) {
           const codes = await detector.detect(video);
-          if (codes && codes.length) raw = codes[0].rawValue || '';
+          if (codes && codes.length) raw = codes[0].rawValue || "";
         }
+
         if (!raw) raw = detectWithJsQR();
+
         if (raw) {
           const code = normalizeCode(raw);
           const now = Date.now();
@@ -395,29 +513,8 @@
           }
         }
       } catch (e) {}
-      scheduleScan(IS_IOS ? 220 : 140);
-    }
 
-    function startWatchdog() {
-      if (monitorTimer) clearInterval(monitorTimer);
-      lastVideoTickAt = Date.now();
-      lastVideoTime = video.currentTime || 0;
-      monitorTimer = setInterval(async () => {
-        if (!active || busy || !pageVisible || !stream) return;
-        const tracks = stream.getVideoTracks();
-        if (!tracks.length || tracks.some(t => t.readyState !== 'live')) {
-          showResult('error', 'Камера остановилась', 'Нажмите «Повторить»', { autoClose: false, allowRetry: true });
-          return;
-        }
-        const currentTime = video.currentTime || 0;
-        if (currentTime > lastVideoTime + 0.001) {
-          lastVideoTime = currentTime;
-          lastVideoTickAt = Date.now();
-        }
-        if (Date.now() - lastVideoTickAt > 10000) {
-          showResult('error', 'Видео с камеры зависло', 'Нажмите «Повторить»', { autoClose: false, allowRetry: true });
-        }
-      }, 2000);
+      scheduleScan(IS_IOS ? 220 : 140);
     }
 
     async function waitForVideoReady(timeoutMs = 8000) {
@@ -429,110 +526,157 @@
       return false;
     }
 
-    async function startCamera(forceNew = false) {
-      if (cameraStartPromise) return cameraStartPromise;
-      cameraStartPromise = (async () => {
-        hideResult();
-        setStatus('📷 Наведите камеру на QR талона');
+    async function startCamera(options = {}) {
+      const forceRestart = options.forceRestart === true;
+      const isManual = options.manual === true;
 
+      if (startInFlight) return startInFlight;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showResult("error", "Камера не поддерживается", "Откройте страницу в браузере с доступом к камере", { autoClose: false, allowRetry: true });
+        return;
+      }
+
+      startInFlight = (async () => {
         try {
-          if (forceNew) stopStream(true);
+          clearScanTimer();
+          hideResult();
+          cameraError = false;
+          detector = null;
+          active = true;
+          busy = false;
+          setStatus("📷 Открываю камеру...");
 
-          if (!stream) {
-            const constraints = {
-              audio: false,
-              video: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-              }
-            };
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (forceRestart) stopStream();
+          if (stream) {
+            try {
+              video.srcObject = stream;
+              const existingPlay = video.play();
+              if (existingPlay && typeof existingPlay.then === "function") await existingPlay.catch(() => {});
+              scheduleScan(220);
+              setStatus("📷 Наведите камеру на QR талона");
+              canAutoResume = true;
+              return;
+            } catch (e) {
+              stopStream();
+            }
           }
 
-          if (!video.srcObject) video.srcObject = stream;
+          permissionRequested = true;
+          const constraints = {
+            audio: false,
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          };
+
+          const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+          permissionResolved = true;
+          stream = newStream;
+          everStartedSuccessfully = true;
+          canAutoResume = true;
+
+          video.srcObject = stream;
+          video.setAttribute("playsinline", "true");
+          video.setAttribute("webkit-playsinline", "true");
           video.muted = true;
-          video.setAttribute('playsinline', 'true');
-          video.setAttribute('webkit-playsinline', 'true');
+
           try {
             const p = video.play();
-            if (p && typeof p.then === 'function') await p.catch(() => {});
+            if (p && typeof p.then === "function") await p.catch(() => {});
           } catch (e) {}
 
           const ready = await waitForVideoReady(IS_IOS ? 10000 : 7000);
-          if (!ready) throw new Error('video_not_ready');
+          if (!ready) throw new Error("video_not_ready");
 
-          if ('BarcodeDetector' in window) {
-            try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; }
-          } else {
-            detector = null;
+          if ("BarcodeDetector" in window) {
+            try {
+              detector = new BarcodeDetector({ formats: ["qr_code"] });
+            } catch (e) {
+              detector = null;
+            }
           }
 
-          active = true;
-          busy = false;
-          startWatchdog();
+          setStatus("📷 Наведите камеру на QR талона");
           scheduleScan(250);
         } catch (e) {
-          active = false;
-          showResult('error', 'Нет доступа к камере', 'Разрешите доступ к камере и нажмите «Повторить»', { autoClose: false, allowRetry: true });
+          permissionResolved = true;
+          cameraError = true;
+          canAutoResume = false;
+          stopStream();
+          const isDenied = e && (e.name === "NotAllowedError" || e.name === "PermissionDeniedError" || e.name === "SecurityError");
+          showResult(
+            "error",
+            isDenied ? "Нет доступа к камере" : "Камера не работает",
+            isDenied ? "Разрешите доступ к камере и нажмите «Повторить»" : "Нажмите «Повторить»",
+            { autoClose: false, allowRetry: true }
+          );
         } finally {
-          cameraStartPromise = null;
+          startInFlight = null;
         }
       })();
-      return cameraStartPromise;
+
+      return startInFlight;
     }
 
-    retryBtn.addEventListener('click', async () => {
-      busy = false;
+    retryBtn.addEventListener("click", async () => {
+      initAudioOnce();
+      await startCamera({ forceRestart: true, manual: true });
+    });
+
+    ["touchstart", "pointerdown", "click"].forEach(evt => {
+      document.addEventListener(evt, () => {
+        initAudioOnce();
+      }, { passive: true });
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      pageVisible = document.visibilityState === "visible";
+
+      if (!pageVisible) {
+        clearScanTimer();
+        return;
+      }
+
+      initAudioOnce();
+
+      if (stream && active && !busy) {
+        scheduleScan(180);
+        return;
+      }
+
+      if (!permissionResolved) {
+        return;
+      }
+
+      if (everStartedSuccessfully && canAutoResume && !cameraError && !busy && !stream) {
+        startCamera({ forceRestart: false, manual: false }).catch(() => {});
+      }
+    });
+
+    window.addEventListener("focus", () => {
+      pageVisible = true;
+      initAudioOnce();
+      if (stream && active && !busy) scheduleScan(180);
+    });
+
+    window.addEventListener("pagehide", () => {
+      pageVisible = false;
+      clearScanTimer();
+    });
+
+    window.addEventListener("beforeunload", () => {
       active = false;
-      await startCamera(true);
+      pageVisible = false;
+      clearScanTimer();
+      stopStream();
     });
 
-    unlockBtn.addEventListener('click', async () => {
-      await unlockAudio();
-      if (audioUnlocked) {
-        webAudioBeep('ok');
-        unlockBox.classList.remove('show');
-      }
+    window.addEventListener("load", async () => {
+      initAudioOnce();
+      await startCamera({ forceRestart: false, manual: false });
     });
-
-    ['touchstart', 'pointerdown', 'click'].forEach(evt => {
-      document.addEventListener(evt, () => { unlockAudio(); }, { passive: true });
-    });
-
-    document.addEventListener('visibilitychange', async () => {
-      pageVisible = document.visibilityState === 'visible';
-      if (closing) return;
-      if (pageVisible) {
-        if (stream) {
-          active = true;
-          try {
-            const p = video.play();
-            if (p && typeof p.then === 'function') await p.catch(() => {});
-          } catch (e) {}
-          startWatchdog();
-          scheduleScan(180);
-        } else {
-          await startCamera(false);
-        }
-      } else {
-        clearTimers();
-        active = false;
-      }
-    });
-
-    window.addEventListener('pagehide', () => {
-      if (!closing) stopStream(true);
-    });
-
-    window.addEventListener('beforeunload', () => {
-      stopStream(true);
-    });
-
-    window.addEventListener('load', async () => {
-      await unlockAudio().catch(() => {});
-      await startCamera(false);
-    }, { once: true });
   </script>
 </body>
 </html>

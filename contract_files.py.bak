@@ -29,8 +29,8 @@ def _ensure_upload_rights():
 
 
 def _validate_pdf(file_storage):
-    original_name = (file_storage.filename or '').strip()
-    if not original_name.lower().endswith('.pdf'):
+    safe = secure_filename(file_storage.filename or '')
+    if not safe.lower().endswith('.pdf'):
         return False, 'Можно загружать только PDF.'
 
     raw = file_storage.read()
@@ -39,11 +39,8 @@ def _validate_pdf(file_storage):
     if len(raw) == 0:
         return False, 'Файл пустой.'
     if len(raw) > MAX_PDF_BYTES:
-        max_mb = max(1, round(MAX_PDF_BYTES / (1024 * 1024)))
-        return False, f'Файл слишком большой. Разрешено не более {max_mb} МБ.'
-
-    header = raw[:1024].lstrip()
-    if b'%PDF' not in header:
+        return False, 'Файл слишком большой. Разрешено не более 10 МБ.'
+    if not raw.startswith(b'%PDF'):
         return False, 'Файл не похож на PDF.'
     return True, raw
 
@@ -73,15 +70,11 @@ def upload_contract_file(contract_id: int):
         return redirect(request.referrer or '/')
 
     storage_key = f'contract/{contract.id}/{uuid4().hex}.pdf'
-    try:
-        supabase.storage.from_('contracts').upload(
-            path=storage_key,
-            file=payload,
-            file_options={'content-type': 'application/pdf'}
-        )
-    except Exception as e:
-        flash(f'Ошибка загрузки в хранилище: {e}', 'danger')
-        return redirect(request.referrer or '/')
+    supabase.storage.from_('contracts').upload(
+        path=storage_key,
+        file=payload,
+        file_options={'content-type': 'application/pdf'}
+    )
 
     if kind == 'contract':
         olds = ContractFile.query.filter_by(contract_id=contract.id, kind='contract').all()
@@ -96,7 +89,7 @@ def upload_contract_file(contract_id: int):
         bucket='contracts',
         storage_key=storage_key,
         storage_path=storage_key,
-        original_name=(f.filename or '').strip(),
+        original_name=secure_filename(f.filename),
         approval_status='approved' if auto else 'pending',
         uploaded_by_user_id=current_user.id,
         approved_by_user_id=current_user.id if auto else None,

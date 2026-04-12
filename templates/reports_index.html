@@ -3,25 +3,29 @@
 <div class="page-hero">
   <div class="hero-kicker">Аналитика</div>
   <div class="hero-title">Отчёты и графики по реализации СУГ</div>
-  
 </div>
 
 <div class="report-grid">
   <div class="card card-soft section-card">
     <div class="section-title">По всем клиентам</div>
-    
     <a class="btn btn-brand" href="/reports/all">Открыть общий отчёт</a>
   </div>
 
   <div class="card card-soft section-card">
     <div class="section-title">Отчёт по клиенту</div>
-    
-    <div class="d-flex gap-2 flex-wrap">
-      <select class="form-select" id="clientSelect">
-        {% for c in clients %}
-          <option value="{{ c.id }}">{{ c.name }}</option>
-        {% endfor %}
+    <div class="d-flex gap-2 flex-wrap mb-2">
+      <select class="form-select" id="clientCategory" style="max-width:220px" onchange="renderClientOptions()">
+        <option value="all">Все</option>
+        <option value="counterparty">Контрагенты</option>
+        <option value="employee">Сотрудники</option>
       </select>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-start">
+      <div style="flex:1 1 320px; min-width:260px;">
+        <input class="form-control" id="clientPicker" list="clientOptions" placeholder="Начни вводить имя клиента" oninput="syncClientSelection()" onchange="syncClientSelection()" autocomplete="off">
+        <datalist id="clientOptions"></datalist>
+        <input type="hidden" id="clientSelectedId">
+      </div>
       <button class="btn btn-outline-secondary" onclick="goClientReport()">Открыть</button>
     </div>
   </div>
@@ -33,10 +37,66 @@
 </div>
 
 <script>
-function goClientReport(){
-  const id = document.getElementById('clientSelect').value;
-  if(!id) return;
-  window.location.href = `/clients/${id}/reports`;
+const reportClients = [
+{% for c in clients %}
+  {id: {{ c.id }}, name: {{ c.name|tojson }}, category: {{ (c.category if c.category else ('counterparty' if c in counterparty_clients else 'employee'))|tojson }} }{{ ',' if not loop.last }}
+{% endfor %}
+];
+
+function filteredClients(){
+  const category = document.getElementById('clientCategory').value;
+  return reportClients.filter(c => category === 'all' || c.category === category);
 }
+
+function renderClientOptions(){
+  const datalist = document.getElementById('clientOptions');
+  const picker = document.getElementById('clientPicker');
+  const hidden = document.getElementById('clientSelectedId');
+  const previousValue = (picker.value || '').trim();
+  const options = filteredClients();
+  datalist.innerHTML = options.map(c => `<option value="${c.name.replace(/"/g, '&quot;')}" data-id="${c.id}"></option>`).join('');
+
+  const exact = options.find(c => c.name.toLowerCase() === previousValue.toLowerCase());
+  if (exact) {
+    hidden.value = exact.id;
+    picker.value = exact.name;
+  } else {
+    hidden.value = '';
+    if (previousValue) {
+      const firstMatch = options.find(c => c.name.toLowerCase().includes(previousValue.toLowerCase()));
+      if (!firstMatch) {
+        picker.value = '';
+      }
+    }
+  }
+}
+
+function syncClientSelection(){
+  const picker = document.getElementById('clientPicker');
+  const hidden = document.getElementById('clientSelectedId');
+  const value = (picker.value || '').trim().toLowerCase();
+  const match = filteredClients().find(c => c.name.toLowerCase() === value);
+  hidden.value = match ? match.id : '';
+}
+
+function goClientReport(){
+  syncClientSelection();
+  const picker = document.getElementById('clientPicker');
+  const hidden = document.getElementById('clientSelectedId');
+
+  if (!hidden.value) {
+    const value = (picker.value || '').trim().toLowerCase();
+    const firstMatch = filteredClients().find(c => c.name.toLowerCase().includes(value));
+    if (firstMatch) {
+      hidden.value = firstMatch.id;
+      picker.value = firstMatch.name;
+    }
+  }
+
+  if(!hidden.value) return;
+  window.location.href = `/clients/${hidden.value}/reports`;
+}
+
+renderClientOptions();
 </script>
 {% endblock %}

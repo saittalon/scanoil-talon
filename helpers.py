@@ -43,9 +43,13 @@ def _expand_roles(roles):
     if "deputy_director" in expanded:
         expanded.add("zamdirector")
     if "executor" in expanded:
-        expanded.add("operator")
+        expanded.update({"operator", "accountant"})
     if "operator" in expanded:
-        expanded.add("executor")
+        expanded.update({"executor", "accountant"})
+    admin_roles = {"director", "zamdirector", "deputy_director", "accountant"}
+    if expanded & admin_roles:
+        expanded |= admin_roles
+        expanded.update({"executor", "operator"})
     return expanded
 
 

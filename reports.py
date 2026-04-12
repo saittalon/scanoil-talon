@@ -144,7 +144,55 @@ def _client_rows(talons, client):
     return rows
 
 
-def _build_all_reports_data(talons):
+def _resolved_client_category(client):
+    if not client:
+        return 'employee'
+    raw = (getattr(client, 'category', None) or '').strip().lower()
+    if raw in ('counterparty', 'employee'):
+        return raw
+    sample = f"{getattr(client, 'name', '') or ''} {getattr(client, 'full_name', '') or ''}".lower()
+    if any(marker in sample for marker in ['тоо', 'too', 'ип', 'ip', 'llp']):
+        return 'counterparty'
+    return 'employee'
+
+
+def _selected_category():
+    value = (request.args.get('category') or '').strip().lower()
+    return value if value in ('counterparty', 'employee') else ''
+
+
+def _category_label(value: str):
+    return {
+        'counterparty': 'Контрагенты',
+        'employee': 'Сотрудники',
+    }.get(value, 'Все')
+
+
+def _filter_talons_by_category(talons, category: str):
+    if not category:
+        return talons
+    return [t for t in talons if _resolved_client_category(getattr(t, 'client', None)) == category]
+
+
+def _balance_rows_for_category(category: str):
+    rows = []
+    balances = Balance.query.order_by(Balance.updated_at.desc()).all()
+    for b in balances:
+        client = getattr(b, 'client', None)
+        if category and _resolved_client_category(client) != category:
+            continue
+        rows.append({
+            'Клиент': client.name if client else '',
+            'Договор': b.contract.number if b.contract else '—',
+            'Товар': b.product_name,
+            'Остаток': float(b.liters_left or 0),
+            'Контроль': 'Да' if b.balance_control else 'Нет',
+            'Обновлено': format_kz(b.updated_at) if b.updated_at else '',
+        })
+    return rows
+
+
+def _build_all_reports_data(talons, category: str = ''):
     rows = []
     client_summary = {}
     for t in talons:
@@ -167,7 +215,7 @@ def _build_all_reports_data(talons):
             'Списано': spent,
             'Цена': float(price),
             'Стоимость': float(t.liters or 0) * float(price),
-            'АЗС': t.used_agzs.name if t.used_agzs else '',
+            'АГЗС': t.used_agzs.name if t.used_agzs else '',
             'Адрес': '',
             'Статус': talon_status_label(t),
         })
@@ -188,14 +236,7 @@ def _build_all_reports_data(talons):
         else:
             bucket['Активные литры'] += float(t.liters or 0)
     summary_rows = [{'Клиент': name, **vals} for name, vals in client_summary.items()]
-    balance_rows = [{
-        'Клиент': b.client.name if b.client else '',
-        'Договор': b.contract.number if b.contract else '—',
-        'Товар': b.product_name,
-        'Остаток': float(b.liters_left or 0),
-        'Контроль': 'Да' if b.balance_control else 'Нет',
-        'Обновлено': format_kz(b.updated_at) if b.updated_at else '',
-    } for b in Balance.query.order_by(Balance.updated_at.desc()).all()]
+    balance_rows = _balance_rows_for_category(category)
     return rows, summary_rows, balance_rows
 
 
@@ -281,6 +322,7 @@ def client_report_excel(client_id: int):
         {'Показатель': 'Клиент', 'Значение': client.name},
         {'Показатель': 'Период (от)', 'Значение': date_from or '—'},
         {'Показатель': 'Период (до)', 'Значение': date_to or '—'},
+        {'Показатель': 'Категория', 'Значение': category_label},
         {'Показатель': 'Всего талонов', 'Значение': total_count},
         {'Показатель': 'Активные талоны', 'Значение': active_count},
         {'Показатель': 'Использованные талоны', 'Значение': used_count},
@@ -345,8 +387,13 @@ def client_report_excel(client_id: int):
 @login_required
 def all_clients_report_excel():
     start, end, date_from, date_to, month = _resolve_period()
+    category = _selected_category()
+    category_label = _category_label(category)
     talons = _filter_talons(Talon.query.order_by(Talon.id.asc()), start, end)
+    talons = _filter_talons_by_category(talons, category)
     balances = Balance.query.order_by(Balance.updated_at.desc()).all()
+    if category:
+        balances = [b for b in balances if _resolved_client_category(getattr(b, 'client', None)) == category]
 
     total_count = len(talons)
     active_count = sum(1 for t in talons if t.effective_state == 'active')
@@ -435,6 +482,7 @@ def all_clients_report_excel():
     summary_df = pd.DataFrame([
         {'Показатель': 'Период (от)', 'Значение': date_from or '—'},
         {'Показатель': 'Период (до)', 'Значение': date_to or '—'},
+        {'Показатель': 'Категория', 'Значение': category_label},
         {'Показатель': 'Всего талонов', 'Значение': total_count},
         {'Показатель': 'Активные талоны', 'Значение': active_count},
         {'Показатель': 'Использованные талоны', 'Значение': used_count},
@@ -474,7 +522,7 @@ def all_clients_report_excel():
         detail_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=detail_start)
 
         ws = writer.sheets[sheet_name]
-        ws['A1'] = 'Сводка по всем клиентам'
+        ws['A1'] = f'Сводка по всем клиентам ({category_label})'
         ws[f'A{client_start + 1}'] = 'Сводка по клиентам'
         ws[f'A{addendum_start + 1}'] = 'Сводка по доп. соглашениям'
         ws[f'A{balance_start + 1}'] = 'Остатки по договорам'
@@ -492,6 +540,8 @@ def all_clients_report_excel():
     output.seek(0)
     suffix = month or (f'{date_from}_{date_to}' if date_from or date_to else 'all')
     suffix = suffix.replace(':', '-').replace('/', '-')
+    if category:
+        suffix = f'{category}_{suffix}'
     return send_file(output, as_attachment=True, download_name=f'allclients_report_{suffix}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
@@ -499,8 +549,11 @@ def all_clients_report_excel():
 @login_required
 def reports_all_page():
     start, end, date_from, date_to, month = _resolve_period()
+    category = _selected_category()
+    category_label = _category_label(category)
     talons = _filter_talons(Talon.query.order_by(Talon.created_at.desc()), start, end)
-    _rows, summary_rows, balance_rows = _build_all_reports_data(talons)
+    talons = _filter_talons_by_category(talons, category)
+    _rows, summary_rows, balance_rows = _build_all_reports_data(talons, category)
     total_balance_liters = sum(float(item['Остаток'] or 0) for item in balance_rows)
 
     total_count = len(talons)
@@ -559,6 +612,8 @@ def reports_all_page():
         date_from=date_from,
         date_to=date_to,
         selected_month=month,
+        selected_category=category,
+        selected_category_label=category_label,
         pagination=pagination,
     )
 
@@ -636,4 +691,13 @@ def shift_reports_page():
 @login_required
 def reports_index():
     clients = Client.query.order_by(Client.name.asc()).all()
-    return render_template('reports_index.html', clients=clients)
+    counterparty_clients = []
+    employee_clients = []
+    for c in clients:
+        resolved = _resolved_client_category(c)
+        if resolved == 'counterparty':
+            counterparty_clients.append(c)
+        else:
+            employee_clients.append(c)
+    return render_template('reports_index.html', clients=clients, counterparty_clients=counterparty_clients, employee_clients=employee_clients)
+

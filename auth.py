@@ -6,7 +6,7 @@ from security import get_client_ip, check_rate_limit_or_429, log_audit
 
 auth_bp = Blueprint("auth", __name__)
 
-ALLOWED_SITE_USERS = {"Erdaulet1997", "Gulbara2002", "Erlan2003"}
+ALLOWED_SITE_USERS = {"Erdaulet1997", "Gulbara2002", "Erlan2003", "Dana"}
 
 
 @auth_bp.get("/login")

@@ -55,6 +55,26 @@ def _client_tabs(client: Client):
     }
 
 
+def _normalize_client_category(value: str | None):
+    value = (value or '').strip().lower()
+    if value in {'counterparty', 'employee'}:
+        return value
+    return None
+
+
+def _guess_client_category(name: str | None, full_name: str | None = None):
+    sample = f"{name or ''} {full_name or ''}".lower()
+    markers = ['тоо', 'тoо', 'too', 'ип', 'iп', 'ip', 'llp', 'товарищество', 'индивидуальный предприниматель']
+    return 'counterparty' if any(m in sample for m in markers) else 'employee'
+
+
+def _resolve_client_category(form):
+    explicit = _normalize_client_category(form.get('category'))
+    if explicit:
+        return explicit
+    return _guess_client_category(form.get('name'), form.get('full_name'))
+
+
 # ---------------- Балансы (остатки) ----------------
 @clients_bp.post("/clients/<int:client_id>/balance/set", endpoint="balance_set")
 @login_required
@@ -288,6 +308,7 @@ def reject_balance_request(request_id):
 @login_required
 def list_clients():
     q = (request.args.get("q") or "").strip()
+    category = _normalize_client_category(request.args.get("category"))
     query = Client.query
 
     if q:
@@ -299,17 +320,37 @@ def list_clients():
             )
         )
 
+    if category:
+        query = query.filter(
+            or_(
+                Client.category == category,
+                Client.category.is_(None)
+            )
+        )
+
     page = request.args.get("page", 1, type=int)
     pagination = query.order_by(Client.id.desc()).paginate(page=page, per_page=50, error_out=False)
     clients = pagination.items
 
+    counterparty_clients = []
+    employee_clients = []
+    for client in clients:
+        resolved_category = client.category or _guess_client_category(client.name, client.full_name)
+        if resolved_category == 'counterparty':
+            counterparty_clients.append(client)
+        else:
+            employee_clients.append(client)
+
     return render_template(
         "clients.html",
         clients=clients,
+        counterparty_clients=counterparty_clients,
+        employee_clients=employee_clients,
         pagination=pagination,
         is_admin=is_admin(),
         current_role=current_user.role,
         search_query=q,
+        selected_category=category or '',
         quick_report_links=dashboard_month_links()
     )
 
@@ -349,6 +390,7 @@ def client_new_post():
         phone=request.form.get("phone") or None,
         email=request.form.get("email") or None,
         comment=request.form.get("comment") or None,
+        category=_resolve_client_category(request.form),
     )
     db.session.add(c)
     log_audit("create_client", f"{current_user.username} создал клиента {name}", "client", c.id)
@@ -363,8 +405,8 @@ def client_new_post():
 @clients_bp.post("/clients/delete", endpoint="delete_client")
 @login_required
 def delete_client_post():
-    if not is_admin():
-        flash("Только админ может удалять клиентов", "warning")
+    if not has_role("director", "zamdirector", "deputy_director", "executor", "operator", "accountant"):
+        flash("Недостаточно прав для удаления клиентов", "warning")
         return redirect(url_for("clients.list_clients"))
 
     client_id = request.form.get("client_id")
@@ -414,6 +456,48 @@ def client_profile(client_id):
         tabs=_client_tabs(client),
         active_tab="profile",
     )
+
+
+@clients_bp.get("/clients/<int:client_id>/profile/edit", endpoint="client_profile_edit_get")
+@login_required
+def client_profile_edit_get(client_id):
+    client = Client.query.get_or_404(client_id)
+    return render_template(
+        "client_profile_edit.html",
+        client=client,
+        tabs=_client_tabs(client),
+        active_tab="profile",
+    )
+
+
+@clients_bp.post("/clients/<int:client_id>/profile/edit", endpoint="client_profile_edit_post")
+@login_required
+def client_profile_edit_post(client_id):
+    client = Client.query.get_or_404(client_id)
+
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Название в системе обязательно.", "danger")
+        return redirect(url_for("clients.client_profile_edit_get", client_id=client.id))
+
+    client.name = name
+    client.full_name = (request.form.get("full_name") or "").strip() or None
+    client.bin = (request.form.get("bin") or "").strip() or None
+    client.kpp = (request.form.get("kpp") or "").strip() or None
+    client.ogrn = (request.form.get("ogrn") or "").strip() or None
+    client.okpo = (request.form.get("okpo") or "").strip() or None
+    client.legal_address = (request.form.get("legal_address") or "").strip() or None
+    client.fact_address = (request.form.get("fact_address") or "").strip() or None
+    client.post_address = (request.form.get("post_address") or "").strip() or None
+    client.phone = (request.form.get("phone") or "").strip() or None
+    client.email = (request.form.get("email") or "").strip() or None
+    client.comment = (request.form.get("comment") or "").strip() or None
+    client.category = _resolve_client_category(request.form)
+
+    log_audit("update_client", f"{current_user.username} обновил профиль клиента {client.name}", "client", client.id)
+    db.session.commit()
+    flash("Профиль клиента обновлён.", "success")
+    return redirect(url_for("clients.client_profile", client_id=client.id))
 
 
 # ---------------- Договора ----------------

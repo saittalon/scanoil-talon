@@ -114,6 +114,8 @@ def _ensure_balance_change_request_schema():
         "UPDATE balance_change_requests SET created_at = NOW() WHERE created_at IS NULL",
         "CREATE INDEX IF NOT EXISTS ix_balance_change_requests_client_contract ON balance_change_requests (client_id, contract_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_balance_change_requests_status ON balance_change_requests (status)",
+        "ALTER TABLE client ADD COLUMN IF NOT EXISTS category VARCHAR(30) NULL",
+        "CREATE INDEX IF NOT EXISTS ix_client_category ON client (category)",
     ]
     for stmt in statements:
         try:
@@ -143,6 +145,7 @@ ALLOWED_SITE_USERS = {
     "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "123456Muraz"), "director"),
     "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "123456Muraz"), "zamdirector"),
     "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
+    "Dana": (os.getenv("ACCOUNTANT_PASSWORD", "123456Muraz"), "accountant"),
 }
 
 
@@ -256,6 +259,7 @@ def create_app():
                 "manager": "Менеджер",
                 "operator": "Оператор",
                 "executor": "Исполнитель",
+                "accountant": "Бухгалтер",
             }
             return labels.get(role, role)
         return dict(role_label=role_label)

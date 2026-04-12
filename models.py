@@ -38,6 +38,7 @@ class Client(db.Model):
     email = db.Column(db.String(120), nullable=True)
 
     comment = db.Column(db.String(500), nullable=True)
+    category = db.Column(db.String(30), nullable=True, index=True)  # counterparty / employee
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
@@ -79,7 +80,7 @@ class ContractFile(db.Model):
         backref=db.backref("files", lazy=True, order_by="ContractFile.id.desc()")
     )
 
-    kind = db.Column(db.String(50), nullable=False, default="attachment")  # contract / addendum / attachment
+    kind = db.Column(db.String(50), nullable=False, default="attachment")  # contract / addendum / power_of_attorney / attachment
     title = db.Column(db.String(300), nullable=True)
 
     # куда сохранил на сервере, например: uploads/contracts/12/xxxx.pdf

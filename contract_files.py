@@ -18,8 +18,6 @@ SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 MAX_PDF_BYTES = int(os.getenv('MAX_CONTENT_LENGTH', str(10 * 1024 * 1024)))
 
-
-
 APPROVER_ROLES = {'director', 'deputy_director', 'zamdirector', 'accountant'}
 UPLOAD_ROLES = APPROVER_ROLES | {'executor', 'operator'}
 
@@ -37,21 +35,20 @@ def _ensure_upload_rights():
         abort(403)
 
 
-def _resolve_client_category(contract: Contract) -> str | None:
+def _resolve_client_category(contract: Contract) -> str:
     client = getattr(contract, 'client', None)
     value = (getattr(client, 'category', None) or '').strip().lower()
-    if value in {'counterparty', 'employee'}:
-        return value
 
-    sample = f"{getattr(client, 'name', '') or ''} {getattr(client, 'full_name', '') or ''}".lower()
-    markers = ['тоо', 'тoо', 'too', 'ип', 'iп', 'ip', 'llp', 'товарищество', 'индивидуальный предприниматель']
-    return 'counterparty' if any(marker in sample for marker in markers) else 'employee'
+    if value == 'employee':
+        return 'employee'
+    if value == 'counterparty':
+        return 'counterparty'
+
+    return 'counterparty'
 
 
 def _should_require_approval(contract: Contract) -> bool:
-    # Подтверждение требуется только для контрагентов.
-    # Для сотрудников файл подтверждается сразу независимо от роли загрузившего.
-    return _resolve_client_category(contract) == 'counterparty'
+    return _resolve_client_category(contract) != 'employee'
 
 
 def _validate_pdf(file_storage):
@@ -85,7 +82,7 @@ def _validate_pdf(file_storage):
 @login_required
 def upload_contract_file(contract_id: int):
     _ensure_upload_rights()
-    contract = Contract.query.get_or_404(contract_id)
+    contract = Contract.query.options(joinedload(Contract.client)).get_or_404(contract_id)
     f = request.files.get('file')
     kind = (request.form.get('kind') or '').strip()
 
@@ -146,7 +143,7 @@ def upload_contract_file(contract_id: int):
 
     log_audit(
         'upload_contract_file',
-        f'{current_user.username} загрузил {kind} для договора {contract.number}. Статус: {row.approval_status}',
+        f'{current_user.username} загрузил {kind} для договора {contract.number}. Категория: {_resolve_client_category(contract)}. Статус: {row.approval_status}',
         'contract_file',
         row.id
     )

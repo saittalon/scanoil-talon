@@ -19,13 +19,37 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABAS
 MAX_PDF_BYTES = int(os.getenv('MAX_CONTENT_LENGTH', str(10 * 1024 * 1024)))
 
 
-def _can_auto_approve():
-    return current_user.is_authenticated and current_user.role in {'director', 'deputy_director', 'zamdirector', 'accountant'}
+APPROVER_ROLES = {'director', 'deputy_director', 'zamdirector', 'accountant'}
+UPLOAD_ROLES = APPROVER_ROLES | {'executor', 'operator'}
+
+
+def _has_exact_role(*roles):
+    return bool(getattr(current_user, 'is_authenticated', False)) and getattr(current_user, 'role', None) in set(roles)
+
+
+def _can_manage_approvals():
+    return _has_exact_role(*APPROVER_ROLES)
 
 
 def _ensure_upload_rights():
-    if not has_role('director', 'deputy_director', 'zamdirector', 'executor', 'operator'):
+    if not _has_exact_role(*UPLOAD_ROLES):
         abort(403)
+
+
+def _contract_category(contract):
+    category = ((getattr(getattr(contract, 'client', None), 'category', None) or '')).strip().lower()
+    if category in ('counterparty', 'employee'):
+        return category
+
+    name = (getattr(getattr(contract, 'client', None), 'name', None) or '').lower()
+    markers = ('тоо', 'ип', 'too', 'ip', 'llp', 'тОО')
+    return 'counterparty' if any(marker in name for marker in markers) else 'employee'
+
+
+def _can_auto_approve(contract):
+    # Для сотрудников файл подтверждается сразу.
+    # Для контрагентов всегда требуется отдельное подтверждение.
+    return _contract_category(contract) == 'employee'
 
 
 def _validate_pdf(file_storage):
@@ -72,7 +96,9 @@ def upload_contract_file(contract_id: int):
         flash('Не настроено хранилище Supabase.', 'danger')
         return redirect(request.referrer or '/')
 
-    storage_key = f'contract/{contract.id}/{uuid4().hex}.pdf'
+    safe_name = secure_filename(f.filename or '')
+    ext = '.pdf' if not safe_name.lower().endswith('.pdf') else ''
+    storage_key = f'contract/{contract.id}/{uuid4().hex}{ext}'
     try:
         supabase.storage.from_('contracts').upload(
             path=storage_key,
@@ -88,7 +114,7 @@ def upload_contract_file(contract_id: int):
         for old in olds:
             db.session.delete(old)
 
-    auto = _can_auto_approve()
+    auto = _can_auto_approve(contract)
     row = ContractFile(
         contract_id=contract.id,
         kind=kind,
@@ -107,6 +133,7 @@ def upload_contract_file(contract_id: int):
         approved_at=db.func.now() if auto else None,
     )
     db.session.add(row)
+    db.session.flush()
     log_audit('upload_contract_file', f'{current_user.username} загрузил {kind} для договора {contract.number}. Статус: {row.approval_status}', 'contract_file', row.id)
     db.session.commit()
     notify_event('Загружен файл договора', f'{current_user.username} загрузил {kind} для договора {contract.number}. Статус: {row.approval_status}')
@@ -117,16 +144,18 @@ def upload_contract_file(contract_id: int):
 @contract_files_bp.post('/contracts/files/<int:file_id>/approve')
 @login_required
 def approve_contract_file(file_id: int):
-    if not has_role('director', 'deputy_director', 'zamdirector', 'accountant'):
+    if not _can_manage_approvals():
         flash('Подтверждать может только директор, замдиректора или бухгалтер.', 'danger')
         return redirect(request.referrer or '/')
     row = ContractFile.query.get_or_404(file_id)
+    contract_number = row.contract.number if row.contract else '—'
+    file_name = row.original_name or str(row.id)
     row.approval_status = 'approved'
     row.approved_by_user_id = current_user.id
     row.approved_at = db.func.now()
-    log_audit('approve_contract_file', f'{current_user.username} подтвердил файл {row.original_name or row.id}', 'contract_file', row.id)
+    log_audit('approve_contract_file', f'{current_user.username} подтвердил файл {file_name}', 'contract_file', row.id)
     db.session.commit()
-    notify_event('Файл подтвержден', f'{current_user.username} подтвердил файл {row.original_name or row.id} по договору {row.contract.number}')
+    notify_event('Файл подтвержден', f'{current_user.username} подтвердил файл {file_name} по договору {contract_number}')
     flash('Файл подтвержден.', 'success')
     return redirect(request.referrer or '/')
 
@@ -134,19 +163,25 @@ def approve_contract_file(file_id: int):
 @contract_files_bp.post('/contracts/files/<int:file_id>/delete')
 @login_required
 def delete_contract_file(file_id: int):
-    if not has_role('director', 'deputy_director', 'zamdirector'):
-        flash('Удалять файл может только директор или замдиректора.', 'danger')
+    if not _can_manage_approvals():
+        flash('Удалять файл может только директор, замдиректора или бухгалтер.', 'danger')
         return redirect(request.referrer or '/')
 
     row = ContractFile.query.get_or_404(file_id)
+    contract_number = row.contract.number if row.contract else '—'
+    file_name = row.original_name or str(row.id)
+    bucket = row.bucket or 'contracts'
+    storage_key = row.storage_key
+
     try:
-        if supabase is not None and row.storage_key:
-            supabase.storage.from_(row.bucket or 'contracts').remove([row.storage_key])
+        if supabase is not None and storage_key:
+            supabase.storage.from_(bucket).remove([storage_key])
     except Exception:
         pass
-    log_audit('delete_contract_file', f'{current_user.username} удалил файл {row.original_name or row.id}', 'contract_file', row.id)
+
+    log_audit('delete_contract_file', f'{current_user.username} удалил файл {file_name}', 'contract_file', row.id)
     db.session.delete(row)
     db.session.commit()
-    notify_event('Файл удален', f'{current_user.username} удалил файл {row.original_name or row.id} по договору {row.contract.number}')
+    notify_event('Файл удален', f'{current_user.username} удалил файл {file_name} по договору {contract_number}')
     flash('Файл удалён', 'success')
     return redirect(request.referrer or '/')

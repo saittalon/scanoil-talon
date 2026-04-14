@@ -5,9 +5,9 @@ from werkzeug.utils import secure_filename
 from flask import Blueprint, request, redirect, flash, abort
 from flask_login import login_required, current_user
 from supabase import create_client
+from sqlalchemy.orm import joinedload
 
 from models import db, Contract, ContractFile
-from helpers import has_role
 from mail_utils import notify_event
 from security import log_audit
 
@@ -19,57 +19,66 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABAS
 MAX_PDF_BYTES = int(os.getenv('MAX_CONTENT_LENGTH', str(10 * 1024 * 1024)))
 
 
+
 APPROVER_ROLES = {'director', 'deputy_director', 'zamdirector', 'accountant'}
 UPLOAD_ROLES = APPROVER_ROLES | {'executor', 'operator'}
 
 
-def _has_exact_role(*roles):
-    return bool(getattr(current_user, 'is_authenticated', False)) and getattr(current_user, 'role', None) in set(roles)
+def _current_role() -> str:
+    return (getattr(current_user, 'role', None) or '').strip().lower()
 
 
-def _can_manage_approvals():
-    return _has_exact_role(*APPROVER_ROLES)
+def _is_approver() -> bool:
+    return current_user.is_authenticated and _current_role() in APPROVER_ROLES
 
 
 def _ensure_upload_rights():
-    if not _has_exact_role(*UPLOAD_ROLES):
+    if not current_user.is_authenticated or _current_role() not in UPLOAD_ROLES:
         abort(403)
 
 
-def _contract_category(contract):
-    category = ((getattr(getattr(contract, 'client', None), 'category', None) or '')).strip().lower()
-    if category in ('counterparty', 'employee'):
-        return category
+def _resolve_client_category(contract: Contract) -> str | None:
+    client = getattr(contract, 'client', None)
+    value = (getattr(client, 'category', None) or '').strip().lower()
+    if value in {'counterparty', 'employee'}:
+        return value
 
-    name = (getattr(getattr(contract, 'client', None), 'name', None) or '').lower()
-    markers = ('тоо', 'ип', 'too', 'ip', 'llp', 'тОО')
-    return 'counterparty' if any(marker in name for marker in markers) else 'employee'
+    sample = f"{getattr(client, 'name', '') or ''} {getattr(client, 'full_name', '') or ''}".lower()
+    markers = ['тоо', 'тoо', 'too', 'ип', 'iп', 'ip', 'llp', 'товарищество', 'индивидуальный предприниматель']
+    return 'counterparty' if any(marker in sample for marker in markers) else 'employee'
 
 
-def _can_auto_approve(contract):
-    # Для сотрудников файл подтверждается сразу.
-    # Для контрагентов всегда требуется отдельное подтверждение.
-    return _contract_category(contract) == 'employee'
+def _should_require_approval(contract: Contract) -> bool:
+    # Подтверждение требуется только для контрагентов.
+    # Для сотрудников файл подтверждается сразу независимо от роли загрузившего.
+    return _resolve_client_category(contract) == 'counterparty'
 
 
 def _validate_pdf(file_storage):
-    original_name = (file_storage.filename or '').strip()
-    if not original_name.lower().endswith('.pdf'):
-        return False, 'Можно загружать только PDF.'
+    filename = (file_storage.filename or '').strip()
+    if not filename:
+        return False, 'Файл не выбран'
 
-    raw = file_storage.read()
-    file_storage.seek(0)
+    safe_name = secure_filename(filename)
+    if not safe_name.lower().endswith('.pdf'):
+        return False, 'Разрешена загрузка только PDF'
 
-    if len(raw) == 0:
-        return False, 'Файл пустой.'
-    if len(raw) > MAX_PDF_BYTES:
-        max_mb = max(1, round(MAX_PDF_BYTES / (1024 * 1024)))
-        return False, f'Файл слишком большой. Разрешено не более {max_mb} МБ.'
+    file_storage.stream.seek(0, os.SEEK_END)
+    size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
 
-    header = raw[:1024].lstrip()
-    if b'%PDF' not in header:
-        return False, 'Файл не похож на PDF.'
-    return True, raw
+    if size <= 0:
+        return False, 'Файл пустой'
+    if size > MAX_PDF_BYTES:
+        return False, f'PDF слишком большой. Максимум: {MAX_PDF_BYTES // (1024 * 1024)} МБ'
+
+    payload = file_storage.read()
+    file_storage.stream.seek(0)
+
+    if not payload.startswith(b'%PDF'):
+        return False, 'Файл не является корректным PDF'
+
+    return True, payload
 
 
 @contract_files_bp.post('/contracts/<int:contract_id>/files/upload')
@@ -96,9 +105,7 @@ def upload_contract_file(contract_id: int):
         flash('Не настроено хранилище Supabase.', 'danger')
         return redirect(request.referrer or '/')
 
-    safe_name = secure_filename(f.filename or '')
-    ext = '.pdf' if not safe_name.lower().endswith('.pdf') else ''
-    storage_key = f'contract/{contract.id}/{uuid4().hex}{ext}'
+    storage_key = f'contract/{contract.id}/{uuid4().hex}.pdf'
     try:
         supabase.storage.from_('contracts').upload(
             path=storage_key,
@@ -114,7 +121,9 @@ def upload_contract_file(contract_id: int):
         for old in olds:
             db.session.delete(old)
 
-    auto = _can_auto_approve(contract)
+    needs_approval = _should_require_approval(contract)
+    auto = not needs_approval
+
     row = ContractFile(
         contract_id=contract.id,
         kind=kind,
@@ -134,9 +143,20 @@ def upload_contract_file(contract_id: int):
     )
     db.session.add(row)
     db.session.flush()
-    log_audit('upload_contract_file', f'{current_user.username} загрузил {kind} для договора {contract.number}. Статус: {row.approval_status}', 'contract_file', row.id)
+
+    log_audit(
+        'upload_contract_file',
+        f'{current_user.username} загрузил {kind} для договора {contract.number}. Статус: {row.approval_status}',
+        'contract_file',
+        row.id
+    )
     db.session.commit()
-    notify_event('Загружен файл договора', f'{current_user.username} загрузил {kind} для договора {contract.number}. Статус: {row.approval_status}')
+
+    notify_event(
+        'Загружен файл договора',
+        f'{current_user.username} загрузил {kind} для договора {contract.number}. Статус: {row.approval_status}'
+    )
+
     flash('PDF загружен' if auto else 'PDF загружен и отправлен на подтверждение', 'success')
     return redirect(request.referrer or '/')
 
@@ -144,17 +164,21 @@ def upload_contract_file(contract_id: int):
 @contract_files_bp.post('/contracts/files/<int:file_id>/approve')
 @login_required
 def approve_contract_file(file_id: int):
-    if not _can_manage_approvals():
+    if not _is_approver():
         flash('Подтверждать может только директор, замдиректора или бухгалтер.', 'danger')
         return redirect(request.referrer or '/')
-    row = ContractFile.query.get_or_404(file_id)
-    contract_number = row.contract.number if row.contract else '—'
+
+    row = ContractFile.query.options(joinedload(ContractFile.contract)).get_or_404(file_id)
     file_name = row.original_name or str(row.id)
+    contract_number = getattr(row.contract, 'number', '—')
+
     row.approval_status = 'approved'
     row.approved_by_user_id = current_user.id
     row.approved_at = db.func.now()
+
     log_audit('approve_contract_file', f'{current_user.username} подтвердил файл {file_name}', 'contract_file', row.id)
     db.session.commit()
+
     notify_event('Файл подтвержден', f'{current_user.username} подтвердил файл {file_name} по договору {contract_number}')
     flash('Файл подтвержден.', 'success')
     return redirect(request.referrer or '/')
@@ -163,13 +187,13 @@ def approve_contract_file(file_id: int):
 @contract_files_bp.post('/contracts/files/<int:file_id>/delete')
 @login_required
 def delete_contract_file(file_id: int):
-    if not _can_manage_approvals():
+    if not _is_approver():
         flash('Удалять файл может только директор, замдиректора или бухгалтер.', 'danger')
         return redirect(request.referrer or '/')
 
-    row = ContractFile.query.get_or_404(file_id)
-    contract_number = row.contract.number if row.contract else '—'
+    row = ContractFile.query.options(joinedload(ContractFile.contract)).get_or_404(file_id)
     file_name = row.original_name or str(row.id)
+    contract_number = getattr(row.contract, 'number', '—')
     bucket = row.bucket or 'contracts'
     storage_key = row.storage_key
 
@@ -182,6 +206,7 @@ def delete_contract_file(file_id: int):
     log_audit('delete_contract_file', f'{current_user.username} удалил файл {file_name}', 'contract_file', row.id)
     db.session.delete(row)
     db.session.commit()
+
     notify_event('Файл удален', f'{current_user.username} удалил файл {file_name} по договору {contract_number}')
     flash('Файл удалён', 'success')
     return redirect(request.referrer or '/')

@@ -68,6 +68,8 @@ class ContractFile(db.Model):
     Таблица файлов договора (как "папка" в 1С):
     - kind='contract'   -> основной договор (обычно 1 PDF)
     - kind='addendum'   -> доп. соглашения (PDF, много)
+    - kind='power_of_attorney' -> доверенность
+    - kind='payment' -> платёжные документы / платёжки
     - kind='attachment' -> прочие вложения (если нужно)
     """
     __tablename__ = "contract_files"
@@ -80,7 +82,7 @@ class ContractFile(db.Model):
         backref=db.backref("files", lazy=True, order_by="ContractFile.id.desc()")
     )
 
-    kind = db.Column(db.String(50), nullable=False, default="attachment")  # contract / addendum / power_of_attorney / attachment
+    kind = db.Column(db.String(50), nullable=False, default="attachment")  # contract / addendum / power_of_attorney / payment / attachment
     title = db.Column(db.String(300), nullable=True)
 
     # куда сохранил на сервере, например: uploads/contracts/12/xxxx.pdf

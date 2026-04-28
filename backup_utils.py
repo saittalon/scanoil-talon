@@ -12,6 +12,11 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from supabase import create_client
 
+try:
+    import boto3
+except Exception:  # boto3 is optional; backups to Supabase/local still work without it
+    boto3 = None
+
 from models import (
     User, Client, Contract, ContractFile, Balance, Talon,
     AGZS, WebAppToken, BotSession, TalonRedemption, Shift,
@@ -271,6 +276,18 @@ def upload_backup_bytes_to_supabase(bundle_bytes: bytes, filename: str, bucket: 
     if sb is None:
         raise RuntimeError('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set')
 
+    suffix = os.path.splitext(filename)[1] or ''
+    if os.getenv('BACKUP_CLEANUP_BEFORE_UPLOAD', '1') == '1':
+        # Если Supabase Storage почти заполнен, сначала удаляем старые автобэкапы,
+        # а уже потом загружаем новый файл. Раньше очистка была только после upload.
+        cleanup_old_cloud_backups(
+            sb,
+            bucket=bucket,
+            keep_last=keep_last,
+            root_path=base_path,
+            suffixes=(suffix,),
+        )
+
     key = _build_cloud_key(filename, base_path=base_path)
     content_type = content_type or (
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -286,6 +303,62 @@ def upload_backup_bytes_to_supabase(bundle_bytes: bytes, filename: str, bucket: 
         bucket=bucket,
         keep_last=keep_last,
         root_path=base_path,
-        suffixes=(os.path.splitext(filename)[1] or '',),
+        suffixes=(suffix,),
     )
+    return {'bucket': bucket, 'key': key, 'cleanup': cleanup}
+
+
+def _get_s3_client():
+    if boto3 is None:
+        raise RuntimeError('boto3 is not installed. Add boto3 to requirements.txt')
+
+    endpoint_url = os.getenv('BACKUP_S3_ENDPOINT_URL') or None
+    region_name = os.getenv('BACKUP_S3_REGION') or os.getenv('AWS_DEFAULT_REGION') or 'auto'
+    return boto3.client('s3', endpoint_url=endpoint_url, region_name=region_name)
+
+
+def cleanup_old_s3_backups(s3, bucket: str, keep_last: int = 30, root_path: str = 'auto', suffixes=('.zip',)):
+    keep_last = max(1, int(keep_last or 1))
+    prefix = (root_path or '').strip('/ ')
+    if prefix:
+        prefix += '/'
+    suffixes = tuple(s.lower() for s in (suffixes or ('.zip',)))
+
+    try:
+        paginator = s3.get_paginator('list_objects_v2')
+        objects = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for item in page.get('Contents', []) or []:
+                key = item.get('Key') or ''
+                if key.lower().endswith(suffixes):
+                    objects.append({'Key': key, 'LastModified': item.get('LastModified')})
+        objects.sort(key=lambda x: x.get('LastModified') or '', reverse=True)
+        stale = objects[keep_last:]
+        if stale:
+            s3.delete_objects(Bucket=bucket, Delete={'Objects': [{'Key': x['Key']} for x in stale]})
+        return {'removed': len(stale), 'kept': min(len(objects), keep_last)}
+    except Exception as exc:
+        if current_app:
+            current_app.logger.warning('S3 backup cleanup failed: %s', exc)
+        return {'removed': 0, 'kept': 0, 'error': str(exc)[:200]}
+
+
+def upload_backup_bytes_to_s3(bundle_bytes: bytes, filename: str, bucket: str | None = None, base_path: str = 'auto', keep_last: int = 30, content_type: str | None = None):
+    bucket = bucket or os.getenv('BACKUP_S3_BUCKET')
+    if not bucket:
+        raise RuntimeError('BACKUP_S3_BUCKET is not set')
+
+    s3 = _get_s3_client()
+    suffix = os.path.splitext(filename)[1] or ''
+    content_type = content_type or (
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        if filename.lower().endswith('.xlsx') else 'application/zip'
+    )
+
+    if os.getenv('BACKUP_CLEANUP_BEFORE_UPLOAD', '1') == '1':
+        cleanup_old_s3_backups(s3, bucket=bucket, keep_last=keep_last, root_path=base_path, suffixes=(suffix,))
+
+    key = _build_cloud_key(filename, base_path=base_path)
+    s3.put_object(Bucket=bucket, Key=key, Body=bundle_bytes, ContentType=content_type)
+    cleanup = cleanup_old_s3_backups(s3, bucket=bucket, keep_last=keep_last, root_path=base_path, suffixes=(suffix,))
     return {'bucket': bucket, 'key': key, 'cleanup': cleanup}

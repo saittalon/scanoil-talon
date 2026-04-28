@@ -75,6 +75,24 @@ def _resolve_client_category(form):
     return _guess_client_category(form.get('name'), form.get('full_name'))
 
 
+def _client_category_value(client: Client) -> str:
+    explicit = _normalize_client_category(getattr(client, 'category', None))
+    if explicit:
+        return explicit
+    return _guess_client_category(getattr(client, 'name', None), getattr(client, 'full_name', None))
+
+
+def can_change_balance_immediately(client: Client) -> bool:
+    """
+    Директор/замдиректора меняет остаток сразу.
+    Исполнитель/оператор может менять остаток сразу только по сотрудникам.
+    По контрагентам исполнитель/оператор отправляет заявку на подтверждение.
+    """
+    if can_approve_balances():
+        return True
+    return has_role('executor', 'operator') and _client_category_value(client) == 'employee'
+
+
 # ---------------- Балансы (остатки) ----------------
 @clients_bp.post("/clients/<int:client_id>/balance/set", endpoint="balance_set")
 @login_required
@@ -137,7 +155,7 @@ def balance_set(client_id):
     old_liters = float(bal.liters_left or 0) if bal else 0.0
     delta_liters = liters_left - old_liters
 
-    if can_approve_balances():
+    if can_change_balance_immediately(client):
         if bal is None:
             bal = Balance(
                 client_id=client.id,
@@ -538,6 +556,8 @@ def client_contracts(client_id):
         active_tab="contract",
         timedelta=timedelta,
         current_role=current_user.role,
+        client_category=_client_category_value(client),
+        can_change_balance_now=can_change_balance_immediately(client),
     )
 
 

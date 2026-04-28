@@ -89,7 +89,7 @@ def upload_contract_file(contract_id: int):
     if not f or f.filename == '':
         flash('Файл не выбран', 'danger')
         return redirect(request.referrer or '/')
-    if kind not in ('contract', 'addendum', 'power_of_attorney'):
+    if kind not in ('contract', 'addendum', 'power_of_attorney', 'payment'):
         flash('Неверный тип файла', 'danger')
         return redirect(request.referrer or '/')
 
@@ -127,7 +127,8 @@ def upload_contract_file(contract_id: int):
         title=(
             'Основной договор' if kind == 'contract' else
             'Доп. соглашение' if kind == 'addendum' else
-            'Доверенность'
+            'Доверенность' if kind == 'power_of_attorney' else
+            'Платёжка'
         ),
         bucket='contracts',
         storage_key=storage_key,

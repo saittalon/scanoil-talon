@@ -383,9 +383,7 @@ def client_report_excel(client_id: int):
         download_name=f'report_{client.name}.xlsx'.replace(' ', '_'),
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-
-
-
+    
 @reports_bp.get('/reports/all.xlsx')
 @login_required
 def all_clients_report_excel():

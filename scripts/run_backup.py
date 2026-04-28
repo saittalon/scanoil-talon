@@ -14,6 +14,7 @@ from backup_utils import (
     build_backup_zip,
     collect_backup_rows,
     upload_backup_bytes_to_supabase,
+    upload_backup_bytes_to_s3,
 )
 from models import db
 from security import log_audit
@@ -50,36 +51,78 @@ def main():
         print(f"Backup saved: {target}")
         print(f"Tables: {len(manifest.get('tables', {}))}, files: {manifest.get('files_exported', 0)}")
 
-        cloud_enabled = os.getenv("BACKUP_UPLOAD_TO_SUPABASE", "1") == "1"
-        bucket = os.getenv("BACKUP_SUPABASE_BUCKET", "backups")
-        base_path = os.getenv("BACKUP_SUPABASE_PATH", "auto")
-        keep_last = int(os.getenv("BACKUP_KEEP_LAST", "30"))
+        keep_last = int(os.getenv("BACKUP_KEEP_LAST", "10"))
 
-        if cloud_enabled:
-            zip_result = upload_backup_bytes_to_supabase(
-                bundle_bytes=bundle_bytes,
-                filename=filename,
-                bucket=bucket,
-                base_path=base_path,
-                keep_last=keep_last,
-                content_type='application/zip',
-            )
-            print(f"Cloud ZIP backup uploaded: {zip_result['bucket']}/{zip_result['key']}")
-            log_audit('backup_cloud_upload', f"Автобэкап ZIP загружен в Supabase Storage: {zip_result['bucket']}/{zip_result['key']}")
+        supabase_enabled = os.getenv("BACKUP_UPLOAD_TO_SUPABASE", "0") == "1"
+        supabase_bucket = os.getenv("BACKUP_SUPABASE_BUCKET", "backups")
+        supabase_path = os.getenv("BACKUP_SUPABASE_PATH", "auto")
 
-            if excel_enabled and excel_bytes and excel_filename:
-                excel_result = upload_backup_bytes_to_supabase(
-                    bundle_bytes=excel_bytes,
-                    filename=excel_filename,
-                    bucket=bucket,
-                    base_path=base_path,
+        s3_enabled = os.getenv("BACKUP_UPLOAD_TO_S3", "0") == "1"
+        s3_bucket = os.getenv("BACKUP_S3_BUCKET")
+        s3_path = os.getenv("BACKUP_S3_PATH", "auto")
+
+        uploaded_anywhere = False
+
+        if supabase_enabled:
+            try:
+                zip_result = upload_backup_bytes_to_supabase(
+                    bundle_bytes=bundle_bytes,
+                    filename=filename,
+                    bucket=supabase_bucket,
+                    base_path=supabase_path,
                     keep_last=keep_last,
-                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    content_type='application/zip',
                 )
-                print(f"Cloud Excel backup uploaded: {excel_result['bucket']}/{excel_result['key']}")
-                log_audit('backup_cloud_excel_upload', f"Автобэкап Excel загружен в Supabase Storage: {excel_result['bucket']}/{excel_result['key']}")
-        else:
-            print("Cloud backup upload skipped: BACKUP_UPLOAD_TO_SUPABASE=0")
+                uploaded_anywhere = True
+                print(f"Supabase ZIP backup uploaded: {zip_result['bucket']}/{zip_result['key']}")
+                log_audit('backup_cloud_upload', f"Автобэкап ZIP загружен в Supabase Storage: {zip_result['bucket']}/{zip_result['key']}")
+
+                if excel_enabled and excel_bytes and excel_filename:
+                    excel_result = upload_backup_bytes_to_supabase(
+                        bundle_bytes=excel_bytes,
+                        filename=excel_filename,
+                        bucket=supabase_bucket,
+                        base_path=supabase_path,
+                        keep_last=keep_last,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    )
+                    print(f"Supabase Excel backup uploaded: {excel_result['bucket']}/{excel_result['key']}")
+                    log_audit('backup_cloud_excel_upload', f"Автобэкап Excel загружен в Supabase Storage: {excel_result['bucket']}/{excel_result['key']}")
+            except Exception as exc:
+                print(f"Supabase backup upload failed: {exc}")
+                log_audit('backup_supabase_failed', f"Supabase backup upload failed: {str(exc)[:200]}")
+
+        if s3_enabled:
+            try:
+                zip_result = upload_backup_bytes_to_s3(
+                    bundle_bytes=bundle_bytes,
+                    filename=filename,
+                    bucket=s3_bucket,
+                    base_path=s3_path,
+                    keep_last=keep_last,
+                    content_type='application/zip',
+                )
+                uploaded_anywhere = True
+                print(f"S3 ZIP backup uploaded: {zip_result['bucket']}/{zip_result['key']}")
+                log_audit('backup_s3_upload', f"Автобэкап ZIP загружен в S3/R2/Object Storage: {zip_result['bucket']}/{zip_result['key']}")
+
+                if excel_enabled and excel_bytes and excel_filename:
+                    excel_result = upload_backup_bytes_to_s3(
+                        bundle_bytes=excel_bytes,
+                        filename=excel_filename,
+                        bucket=s3_bucket,
+                        base_path=s3_path,
+                        keep_last=keep_last,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    )
+                    print(f"S3 Excel backup uploaded: {excel_result['bucket']}/{excel_result['key']}")
+                    log_audit('backup_s3_excel_upload', f"Автобэкап Excel загружен в S3/R2/Object Storage: {excel_result['bucket']}/{excel_result['key']}")
+            except Exception as exc:
+                print(f"S3 backup upload failed: {exc}")
+                log_audit('backup_s3_failed', f"S3 backup upload failed: {str(exc)[:200]}")
+
+        if not uploaded_anywhere:
+            print("Cloud backup upload skipped or failed; backup saved locally only.")
             log_audit('backup_local_only', 'Автобэкап сохранён только локально')
 
         db.session.commit()

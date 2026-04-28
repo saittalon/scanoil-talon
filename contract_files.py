@@ -89,7 +89,7 @@ def upload_contract_file(contract_id: int):
     if not f or f.filename == '':
         flash('Файл не выбран', 'danger')
         return redirect(request.referrer or '/')
-    if kind not in ('contract', 'addendum', 'power_of_attorney', 'payment'):
+    if kind not in ('contract', 'addendum', 'power_of_attorney', 'payment_order'):
         flash('Неверный тип файла', 'danger')
         return redirect(request.referrer or '/')
 

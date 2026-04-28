@@ -325,7 +325,7 @@ def client_report_excel(client_id: int):
         {'Показатель': 'Клиент', 'Значение': client.name},
         {'Показатель': 'Период (от)', 'Значение': date_from or '—'},
         {'Показатель': 'Период (до)', 'Значение': date_to or '—'},
-        {'Показатель': 'Категория', 'Значение':_category_label(_selected_category() or _resolved_client_category(client))},
+        {'Показатель': 'Категория', 'Значение': _category_label(_selected_category() or _resolved_client_category(client))},
         {'Показатель': 'Всего талонов', 'Значение': total_count},
         {'Показатель': 'Активные талоны', 'Значение': active_count},
         {'Показатель': 'Использованные талоны', 'Значение': used_count},

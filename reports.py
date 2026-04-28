@@ -244,6 +244,9 @@ def _build_all_reports_data(talons, category: str = ''):
 @login_required
 def client_report_excel(client_id: int):
     client = Client.query.get_or_404(client_id)
+    category = _selected_category() or _resolved_client_category(client)
+    category_label = _category_label(category)
+
     date_from = (request.args.get('date_from') or '').strip()
     date_to = (request.args.get('date_to') or '').strip()
 

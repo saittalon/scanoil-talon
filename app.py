@@ -391,14 +391,26 @@ def create_app():
         log_audit('send_daily_report', f'Ручная отправка отчёта: {bool(ok)}')
         return jsonify({"ok": bool(ok)})
 
+
+    @app.get("/test-email")
+    def test_email():
+        try:
+            result = send_daily_report()
+            return f"OK: {result}"
+        except Exception as e:
+            return f"ERROR: {str(e)}"
+
+
     @app.get("/tg/scan")
     def tg_scan():
         token = request.args.get("token", "").strip()
         return render_template("tg_scan.html", token=token)
 
+
     @app.post("/tg/api/scan")
     def tg_api_scan():
         data = request.get_json(silent=True) or {}
+
         token = (data.get("token") or "").strip()
         code = (data.get("code") or "").strip()
         init_data = (data.get("initData") or "").strip()

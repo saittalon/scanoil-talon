@@ -391,7 +391,6 @@ def create_app():
         log_audit('send_daily_report', f'Ручная отправка отчёта: {bool(ok)}')
         return jsonify({"ok": bool(ok)})
 
-
     @app.get("/test-email")
     def test_email():
         try:
@@ -399,7 +398,6 @@ def create_app():
             return f"OK: {result}"
         except Exception as e:
             return f"ERROR: {e}"
-
 
     @app.get("/tg/scan")
     def tg_scan():

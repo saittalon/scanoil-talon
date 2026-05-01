@@ -404,16 +404,6 @@ def create_app():
         token = request.args.get("token", "").strip()
         return render_template("tg_scan.html", token=token)
 
-    @app.post("/tg/api/scan")
-    def tg_api_scan():
-        data = request.get_json(silent=True) or {}
-        token = (data.get("token") or "").strip()
-        code = (data.get("code") or "").strip()
-        init_data = (data.get("initData") or "").strip()
-
-        if not token or not code:
-            return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
-
         tg_user = None
         if init_data:
             ok, reason, tg_user = verify_telegram_init_data(init_data, os.getenv('BOT_TOKEN', '').strip())

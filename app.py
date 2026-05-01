@@ -390,15 +390,17 @@ def create_app():
         ok = send_daily_report()
         log_audit('send_daily_report', f'Ручная отправка отчёта: {bool(ok)}')
         return jsonify({"ok": bool(ok)})
-        
+
+
     @app.get("/test-email")
     def test_email():
-    try:
-        result = send_daily_report()
-        return f"OK: {result}"
+        try:
+            result = send_daily_report()
+            return f"OK: {result}"
         except Exception as e:
-        return f"ERROR: {e}"
-    
+            return f"ERROR: {e}"
+
+
     @app.get("/tg/scan")
     def tg_scan():
         token = request.args.get("token", "").strip()

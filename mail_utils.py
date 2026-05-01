@@ -79,3 +79,5 @@ def send_daily_report():
         'Во вложении ежедневный отчет по талонам и клиентам.',
         attachments=[daily_report_attachment()],
     )
+print("TEST EMAIL...")
+send_daily_report()

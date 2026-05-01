@@ -2,7 +2,7 @@ import os
 import json
 from urllib import request as urllib_request, parse as urllib_parse
 from datetime import datetime, timezone
-
+from mail_utils import send_daily_report
 from sqlalchemy import text
 
 from flask import (

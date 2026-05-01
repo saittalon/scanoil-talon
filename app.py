@@ -144,7 +144,7 @@ def _configure_logging(app):
 ALLOWED_SITE_USERS = {
     "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "123456Muraz"), "director"),
     "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "123456Muraz"), "zamdirector"),
-    "Erlan": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
+    "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
     "Dana": (os.getenv("ACCOUNTANT_PASSWORD", "123456Muraz"), "accountant"),
 }
 
@@ -391,18 +391,20 @@ def create_app():
         log_audit('send_daily_report', f'Ручная отправка отчёта: {bool(ok)}')
         return jsonify({"ok": bool(ok)})
 
-    @app.get("/test-email")
-    def test_email():
-        try:
-            result = send_daily_report()
-            return f"OK: {result}"
-        except Exception as e:
-            return f"ERROR: {e}"
-
     @app.get("/tg/scan")
     def tg_scan():
         token = request.args.get("token", "").strip()
         return render_template("tg_scan.html", token=token)
+
+    @app.post("/tg/api/scan")
+    def tg_api_scan():
+        data = request.get_json(silent=True) or {}
+        token = (data.get("token") or "").strip()
+        code = (data.get("code") or "").strip()
+        init_data = (data.get("initData") or "").strip()
+
+        if not token or not code:
+            return jsonify({"ok": False, "error": "missing_token_or_code"}), 400
 
         tg_user = None
         if init_data:
@@ -542,3 +544,11 @@ app = create_app()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
+    
+@app.route("/test-email")
+def test_email():
+    try:
+        result = send_daily_report()
+        return f"OK: {result}"
+    except Exception as e:
+        return f"ERROR: {e}"

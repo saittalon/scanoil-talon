@@ -71,3 +71,22 @@ def daily_report_attachment():
         pd.DataFrame(rows).to_excel(writer, sheet_name='daily', index=False)
     bio.seek(0)
     return ('daily_report.xlsx', bio.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    
+def send_daily_report():
+    try:
+        attachment = daily_report_attachment()
+
+        subject = "Ежедневный отчёт по талонам"
+        body = "Во вложении находится актуальный отчёт по талонам."
+
+        result = send_email(
+            subject=subject,
+            body=body,
+            attachments=[attachment]
+        )
+
+        return result
+
+    except Exception as e:
+        print(f'DAILY REPORT ERROR: {e}')
+        return False

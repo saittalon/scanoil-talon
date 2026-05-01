@@ -2,7 +2,7 @@ import os
 import json
 from urllib import request as urllib_request, parse as urllib_parse
 from datetime import datetime, timezone
-from mail_utils import send_daily_report
+
 from sqlalchemy import text
 
 from flask import (
@@ -544,11 +544,3 @@ app = create_app()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
-    
-@app.route("/test-email")
-def test_email():
-    try:
-        result = send_daily_report()
-        return f"OK: {result}"
-    except Exception as e:
-        return f"ERROR: {e}"

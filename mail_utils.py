@@ -235,7 +235,7 @@ def send_monthly_reports():
         attachments += monthly_reports_by_clients()
 
         return send_email(
-            subject="Месячные отчёты",
+            subject="Ежемесячные отчёты",
             body="Общий + по каждому клиенту",
             attachments=attachments
         )

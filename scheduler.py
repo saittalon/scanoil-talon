@@ -1,18 +1,21 @@
 import time
 from datetime import datetime
 
+print("VERSION FINAL", flush=True)
+
 from app import create_app
 from mail_utils import send_monthly_reports, send_daily_report
 
+print("IMPORTS OK", flush=True)
 
-print("VERSION FINAL", flush=True)
+try:
+    app = create_app()
+    print("APP CREATED", flush=True)
+except Exception as e:
+    print("APP CREATE ERROR:", e, flush=True)
+    raise
 
-app = create_app()
 
-print("APP CREATED", flush=True)
-
-
-# 🔒 защита от дублей (в памяти)
 last_run = {
     "daily": None,
     "monthly": None
@@ -41,13 +44,13 @@ def mark_sent(key):
         last_run["monthly"] = (now.year, now.month)
 
 
+# 🔥 ВКЛЮЧАЕМ ТЕСТ
 def should_send_daily():
     return True
 
 
 def should_send_monthly():
-    now = datetime.now()
-    return now.day == 1 and now.hour == 9  # 1 числа в 09:00
+    return True
 
 
 with app.app_context():
@@ -55,16 +58,16 @@ with app.app_context():
 
     while True:
         try:
+            print("INSIDE LOOP", flush=True)
+
             now = datetime.now()
             print("NOW:", now, flush=True)
 
-            # 📅 МЕСЯЧНЫЙ ОТЧЁТ
             if should_send_monthly() and not already_sent("monthly"):
                 print("SENDING MONTHLY REPORT...", flush=True)
                 send_monthly_reports()
                 mark_sent("monthly")
 
-            # 📆 ЕЖЕДНЕВНЫЙ ОТЧЁТ
             if should_send_daily() and not already_sent("daily"):
                 print("SENDING DAILY REPORT...", flush=True)
                 send_daily_report()
@@ -73,4 +76,4 @@ with app.app_context():
         except Exception as e:
             print("SCHEDULER ERROR:", e, flush=True)
 
-        time.sleep(60)
+        time.sleep(10)  # быстрее для теста

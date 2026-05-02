@@ -1,6 +1,3 @@
-print("VERSION 2", flush=True)
-
-import os
 import time
 from datetime import datetime
 
@@ -8,37 +5,50 @@ from app import create_app
 from mail_utils import send_monthly_reports, send_daily_report
 
 
+print("VERSION FINAL", flush=True)
+
 app = create_app()
 
-print("FILE LOADED", flush=True)
+print("APP CREATED", flush=True)
 
 
-last_run_file = "/tmp/last_run.txt"
+# 🔒 защита от дублей (в памяти)
+last_run = {
+    "daily": None,
+    "monthly": None
+}
 
 
 def already_sent(key):
     now = datetime.now()
-    marker = now.strftime("%Y-%m-%d") + "_" + key
 
-    if os.path.exists(last_run_file):
-        with open(last_run_file, "r") as f:
-            if marker in f.read():
-                return True
+    if key == "daily":
+        return last_run["daily"] == now.date()
 
-    with open(last_run_file, "a") as f:
-        f.write(marker + "\n")
+    if key == "monthly":
+        return last_run["monthly"] == (now.year, now.month)
 
     return False
 
 
-def should_send_monthly():
+def mark_sent(key):
     now = datetime.now()
-    return now.day == 1 and now.hour == 9
+
+    if key == "daily":
+        last_run["daily"] = now.date()
+
+    if key == "monthly":
+        last_run["monthly"] = (now.year, now.month)
 
 
 def should_send_daily():
     now = datetime.now()
-    return now.hour == 18
+    return now.hour == 18  # каждый день в 18:00
+
+
+def should_send_monthly():
+    now = datetime.now()
+    return now.day == 1 and now.hour == 9  # 1 числа в 09:00
 
 
 with app.app_context():
@@ -49,15 +59,17 @@ with app.app_context():
             now = datetime.now()
             print("NOW:", now, flush=True)
 
-            # 📅 МЕСЯЧНЫЙ
+            # 📅 МЕСЯЧНЫЙ ОТЧЁТ
             if should_send_monthly() and not already_sent("monthly"):
                 print("SENDING MONTHLY REPORT...", flush=True)
                 send_monthly_reports()
+                mark_sent("monthly")
 
-            # 📆 ЕЖЕДНЕВНЫЙ
+            # 📆 ЕЖЕДНЕВНЫЙ ОТЧЁТ
             if should_send_daily() and not already_sent("daily"):
                 print("SENDING DAILY REPORT...", flush=True)
                 send_daily_report()
+                mark_sent("daily")
 
         except Exception as e:
             print("SCHEDULER ERROR:", e, flush=True)

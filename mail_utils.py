@@ -5,12 +5,11 @@ from email.message import EmailMessage
 from io import BytesIO
 from datetime import datetime, timedelta
 from collections import defaultdict
-from flask import current_app
 
 import pandas as pd
 
 from models import Talon
-from helpers import talon_status_label, format_kz
+from helpers import talon_status_label, format_kz, kz_now
 
 
 # ================= EMAIL =================
@@ -86,23 +85,18 @@ def build_excel(rows, sheet_name="report"):
     bio = BytesIO()
     df = pd.DataFrame(rows)
 
-    # если нет данных
     if df.empty:
         df = pd.DataFrame([
             {"Нет данных": "За выбранный период нет использованных талонов"}
         ])
 
     with pd.ExcelWriter(bio, engine='openpyxl') as writer:
-        # 🔥 ОБЯЗАТЕЛЬНО записать DataFrame
         df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # 🔥 получить лист
         ws = writer.sheets[sheet_name]
 
-        # фильтр
         ws.auto_filter.ref = ws.dimensions
 
-        # ширина колонок
         for col in ws.columns:
             max_length = 0
             col_letter = col[0].column_letter
@@ -120,8 +114,9 @@ def build_excel(rows, sheet_name="report"):
 # ================= DAILY =================
 
 def daily_report_attachment():
-    today = datetime.utcnow()
-    start = datetime(today.year, today.month, today.day)
+    now = kz_now()
+
+    start = datetime(now.year, now.month, now.day)
     end = start + timedelta(days=1)
 
     rows = []
@@ -158,16 +153,22 @@ def send_daily_report():
 
 # ================= MONTHLY =================
 
-def monthly_report_attachment():
-    now = datetime.utcnow()
+def get_last_month_range():
+    now = kz_now()
 
     first_day_this_month = datetime(now.year, now.month, 1)
     last_month_end = first_day_this_month - timedelta(seconds=1)
     last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
 
+    return last_month_start, last_month_end
+
+
+def monthly_report_attachment():
+    start, end = get_last_month_range()
+
     rows = []
 
-    for t in get_used_talons_query(last_month_start, last_month_end).all():
+    for t in get_used_talons_query(start, end).all():
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
@@ -185,15 +186,11 @@ def monthly_report_attachment():
 
 
 def monthly_reports_by_clients():
-    now = datetime.utcnow()
-
-    first_day_this_month = datetime(now.year, now.month, 1)
-    last_month_end = first_day_this_month - timedelta(seconds=1)
-    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
+    start, end = get_last_month_range()
 
     data = defaultdict(list)
 
-    for t in get_used_talons_query(last_month_start, last_month_end).all():
+    for t in get_used_talons_query(start, end).all():
         client = t.client.name if t.client else "Без клиента"
 
         data[client].append({
@@ -219,15 +216,14 @@ def monthly_reports_by_clients():
 
 def send_monthly_reports():
     try:
-        with current_app.app_context():
-            attachments = [monthly_report_attachment()]
-            attachments += monthly_reports_by_clients()
+        attachments = [monthly_report_attachment()]
+        attachments += monthly_reports_by_clients()
 
-            return send_email(
-                subject="Месячные отчёты",
-                body="Общий + по каждому клиенту",
-                attachments=attachments
-            )
+        return send_email(
+            subject="Месячные отчёты",
+            body="Общий + по каждому клиенту",
+            attachments=attachments
+        )
     except Exception as e:
         print(f'MONTHLY REPORT ERROR: {e}')
         return False

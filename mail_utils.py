@@ -86,9 +86,17 @@ def build_excel(rows, sheet_name="report"):
     bio = BytesIO()
     df = pd.DataFrame(rows)
 
+    # если нет данных
+    if df.empty:
+        df = pd.DataFrame([
+            {"Нет данных": "За выбранный период нет использованных талонов"}
+        ])
+
     with pd.ExcelWriter(bio, engine='openpyxl') as writer:
+        # 🔥 ОБЯЗАТЕЛЬНО записать DataFrame
         df.to_excel(writer, sheet_name=sheet_name, index=False)
 
+        # 🔥 получить лист
         ws = writer.sheets[sheet_name]
 
         # фильтр
@@ -98,9 +106,11 @@ def build_excel(rows, sheet_name="report"):
         for col in ws.columns:
             max_length = 0
             col_letter = col[0].column_letter
+
             for cell in col:
                 if cell.value:
                     max_length = max(max_length, len(str(cell.value)))
+
             ws.column_dimensions[col_letter].width = max_length + 2
 
     bio.seek(0)
@@ -150,11 +160,14 @@ def send_daily_report():
 
 def monthly_report_attachment():
     now = datetime.utcnow()
-    start = datetime(now.year, now.month, 1)
+
+    first_day_this_month = datetime(now.year, now.month, 1)
+    last_month_end = first_day_this_month - timedelta(seconds=1)
+    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
 
     rows = []
 
-    for t in get_used_talons_query(start).all():
+    for t in get_used_talons_query(last_month_start, last_month_end).all():
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
@@ -173,11 +186,14 @@ def monthly_report_attachment():
 
 def monthly_reports_by_clients():
     now = datetime.utcnow()
-    start = datetime(now.year, now.month, 1)
+
+    first_day_this_month = datetime(now.year, now.month, 1)
+    last_month_end = first_day_this_month - timedelta(seconds=1)
+    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
 
     data = defaultdict(list)
 
-    for t in get_used_talons_query(start).all():
+    for t in get_used_talons_query(last_month_start, last_month_end).all():
         client = t.client.name if t.client else "Без клиента"
 
         data[client].append({
@@ -203,14 +219,15 @@ def monthly_reports_by_clients():
 
 def send_monthly_reports():
     try:
-        attachments = [monthly_report_attachment()]
-        attachments += monthly_reports_by_clients()
+        with current_app.app_context():
+            attachments = [monthly_report_attachment()]
+            attachments += monthly_reports_by_clients()
 
-        return send_email(
-            subject="Месячные отчёты",
-            body="Общий + по каждому клиенту",
-            attachments=attachments
-        )
+            return send_email(
+                subject="Месячные отчёты",
+                body="Общий + по каждому клиенту",
+                attachments=attachments
+            )
     except Exception as e:
         print(f'MONTHLY REPORT ERROR: {e}')
         return False

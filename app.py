@@ -402,7 +402,7 @@ def create_app():
 
     @app.get("/send-monthly")
     def send_monthly():
-        return str(send_monthly_reports())
+        return "HELLO MONTHLY"
 
 
     @app.get("/tg/scan")

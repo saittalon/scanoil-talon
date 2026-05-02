@@ -164,16 +164,28 @@ def get_last_month_range():
 
 
 def monthly_report_attachment():
-    start, end = get_last_month_range()
+    now = datetime.utcnow()
+
+    first_day_this_month = datetime(now.year, now.month, 1)
+    last_month_end = first_day_this_month - timedelta(seconds=1)
+    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
 
     rows = []
 
-    for t in get_used_talons_query(start, end).all():
+    for t in get_used_talons_query(last_month_start, last_month_end).all():
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
+
+            # 🔥 ВОТ НОВОЕ
+            'Договор': t.contract.number if t.contract else '',
+            'Доп. соглашение': (
+                t.addendum_file.title
+                if t.addendum_file and t.addendum_file.title
+                else (t.addendum_file.original_name if t.addendum_file else '')
+            ),
         })
 
     file = build_excel(rows, "monthly_all")
@@ -186,11 +198,15 @@ def monthly_report_attachment():
 
 
 def monthly_reports_by_clients():
-    start, end = get_last_month_range()
+    now = datetime.utcnow()
+
+    first_day_this_month = datetime(now.year, now.month, 1)
+    last_month_end = first_day_this_month - timedelta(seconds=1)
+    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
 
     data = defaultdict(list)
 
-    for t in get_used_talons_query(start, end).all():
+    for t in get_used_talons_query(last_month_start, last_month_end).all():
         client = t.client.name if t.client else "Без клиента"
 
         data[client].append({
@@ -198,6 +214,14 @@ def monthly_reports_by_clients():
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
+
+            # 🔥 ВОТ НОВОЕ
+            'Договор': t.contract.number if t.contract else '',
+            'Доп. соглашение': (
+                t.addendum_file.title
+                if t.addendum_file and t.addendum_file.title
+                else (t.addendum_file.original_name if t.addendum_file else '')
+            ),
         })
 
     attachments = []
@@ -212,7 +236,6 @@ def monthly_reports_by_clients():
         ))
 
     return attachments
-
 
 def send_monthly_reports():
     try:

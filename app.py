@@ -2,7 +2,7 @@ import os
 import json
 from urllib import request as urllib_request, parse as urllib_parse
 from datetime import datetime, timezone
-from mail_utils import send_daily_report
+from mail_utils import send_daily_report, send_monthly_reports
 from sqlalchemy import text
 
 from flask import (
@@ -399,6 +399,10 @@ def create_app():
             return f"OK: {result}"
         except Exception as e:
             return f"ERROR: {str(e)}"
+
+    @app.get("/send-monthly")
+    def send_monthly():
+        return str(send_monthly_reports())
 
 
     @app.get("/tg/scan")

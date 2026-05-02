@@ -23,7 +23,6 @@ from clients import clients_bp
 from reports import reports_bp
 from helpers import require_roles, talon_status_label, format_kz, kz_now, redeem_talon_atomic, talon_display_number
 from models import AuditLog
-from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 from security import (
     get_csrf_token,

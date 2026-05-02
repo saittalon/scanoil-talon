@@ -42,8 +42,7 @@ def mark_sent(key):
 
 
 def should_send_daily():
-    now = datetime.now()
-    return now.hour == 18  # каждый день в 18:00
+    return True
 
 
 def should_send_monthly():

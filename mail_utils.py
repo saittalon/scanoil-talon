@@ -3,10 +3,16 @@ import smtplib
 import threading
 from email.message import EmailMessage
 from io import BytesIO
+from datetime import datetime, timedelta
+from collections import defaultdict
+
 import pandas as pd
+
 from models import Talon
 from helpers import talon_status_label, format_kz
 
+
+# ================= EMAIL =================
 
 def _recipients():
     raw = os.getenv('MAIL_TO', '').strip()
@@ -21,22 +27,27 @@ def send_email(subject: str, body: str, attachments=None):
     password = os.getenv('SMTP_PASSWORD', '').strip()
     sender = os.getenv('MAIL_FROM', username or 'noreply@example.com')
     use_tls = os.getenv('SMTP_USE_TLS', '1').strip() not in ('0', 'false', 'False')
+
     if not recipients or not host:
         return False
+
     msg = EmailMessage()
     msg['Subject'] = subject
     msg['From'] = sender
     msg['To'] = ', '.join(recipients)
     msg.set_content(body)
+
     for name, content, mime in attachments or []:
         maintype, subtype = mime.split('/', 1)
         msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=name)
+
     with smtplib.SMTP(host, port, timeout=10) as s:
         if use_tls:
             s.starttls()
         if username:
             s.login(username, password)
         s.send_message(msg)
+
     return True
 
 
@@ -46,6 +57,7 @@ def notify_event(subject: str, body: str):
             send_email(subject, body)
         except Exception as e:
             print(f'EMAIL ERROR: {e}')
+
     try:
         threading.Thread(target=_worker, daemon=True).start()
         return True
@@ -54,39 +66,150 @@ def notify_event(subject: str, body: str):
         return False
 
 
+# ================= DATA =================
+
+def get_used_talons_query(start=None, end=None):
+    q = Talon.query.filter(Talon.used_at.isnot(None))
+
+    if start:
+        q = q.filter(Talon.used_at >= start)
+    if end:
+        q = q.filter(Talon.used_at <= end)
+
+    return q.order_by(Talon.used_at.desc())
+
+
+# ================= EXCEL =================
+
+def build_excel(rows, sheet_name="report"):
+    bio = BytesIO()
+    df = pd.DataFrame(rows)
+
+    with pd.ExcelWriter(bio, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        ws = writer.sheets[sheet_name]
+
+        # фильтр
+        ws.auto_filter.ref = ws.dimensions
+
+        # ширина колонок
+        for col in ws.columns:
+            max_length = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = max_length + 2
+
+    bio.seek(0)
+    return bio.read()
+
+
+# ================= DAILY =================
+
 def daily_report_attachment():
+    today = datetime.utcnow()
+    start = datetime(today.year, today.month, today.day)
+    end = start + timedelta(days=1)
+
     rows = []
-    for t in Talon.query.order_by(Talon.created_at.desc()).all():
+
+    for t in get_used_talons_query(start, end):
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
-            'Код': t.code,
             'Литры': float(t.liters or 0),
-            'Статус': talon_status_label(t),
-            'Дата и время использования': format_kz(t.used_at),
+            'Дата': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
         })
-    bio = BytesIO()
-    with pd.ExcelWriter(bio, engine='openpyxl') as writer:
-        pd.DataFrame(rows).to_excel(writer, sheet_name='daily', index=False)
-    bio.seek(0)
-    return ('daily_report.xlsx', bio.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    
+
+    file = build_excel(rows, "daily")
+
+    return (
+        'daily_report.xlsx',
+        file,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
 def send_daily_report():
     try:
-        attachment = daily_report_attachment()
-
-        subject = "Ежедневный отчёт по талонам"
-        body = "Во вложении находится актуальный отчёт по талонам."
-
-        result = send_email(
-            subject=subject,
-            body=body,
-            attachments=[attachment]
+        return send_email(
+            subject="Ежедневный отчёт (использованные талоны)",
+            body="Отчёт за сегодня",
+            attachments=[daily_report_attachment()]
         )
-
-        return result
-
     except Exception as e:
         print(f'DAILY REPORT ERROR: {e}')
+        return False
+
+
+# ================= MONTHLY =================
+
+def monthly_report_attachment():
+    now = datetime.utcnow()
+    start = datetime(now.year, now.month, 1)
+
+    rows = []
+
+    for t in get_used_talons_query(start):
+        rows.append({
+            'Клиент': t.client.name if t.client else '',
+            '№ талона': t.serial_number,
+            'Литры': float(t.liters or 0),
+            'Дата': format_kz(t.used_at),
+        })
+
+    file = build_excel(rows, "monthly_all")
+
+    return (
+        'monthly_report.xlsx',
+        file,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+def monthly_reports_by_clients():
+    now = datetime.utcnow()
+    start = datetime(now.year, now.month, 1)
+
+    data = defaultdict(list)
+
+    for t in get_used_talons_query(start):
+        client = t.client.name if t.client else "Без клиента"
+
+        data[client].append({
+            '№ талона': t.serial_number,
+            'Литры': float(t.liters or 0),
+            'Дата': format_kz(t.used_at),
+            'АГЗС': t.used_agzs.name if t.used_agzs else '',
+        })
+
+    attachments = []
+
+    for client, rows in data.items():
+        file = build_excel(rows, client[:20])
+
+        attachments.append((
+            f"{client}_monthly.xlsx",
+            file,
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ))
+
+    return attachments
+
+
+def send_monthly_reports():
+    try:
+        attachments = [monthly_report_attachment()]
+        attachments += monthly_reports_by_clients()
+
+        return send_email(
+            subject="Месячные отчёты",
+            body="Общий + по каждому клиенту",
+            attachments=attachments
+        )
+    except Exception as e:
+        print(f'MONTHLY REPORT ERROR: {e}')
         return False

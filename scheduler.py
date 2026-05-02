@@ -1,3 +1,5 @@
+print("VERSION 2", flush=True)
+
 import os
 import time
 from datetime import datetime
@@ -8,10 +10,9 @@ from mail_utils import send_monthly_reports, send_daily_report
 
 app = create_app()
 
-print("FILE LOADED")
+print("FILE LOADED", flush=True)
 
 
-# чтобы не отправляло по 100 раз
 last_run_file = "/tmp/last_run.txt"
 
 
@@ -32,33 +33,33 @@ def already_sent(key):
 
 def should_send_monthly():
     now = datetime.now()
-    return now.day == 1 and now.hour == 9  # 1 число в 09:00
+    return now.day == 1 and now.hour == 9
 
 
 def should_send_daily():
     now = datetime.now()
-    return now.hour == 18  # каждый день в 18:00
+    return now.hour == 18
 
 
 with app.app_context():
-    print("SCHEDULER STARTED")
+    print("SCHEDULER STARTED", flush=True)
 
     while True:
         try:
             now = datetime.now()
-            print("NOW:", now)
+            print("NOW:", now, flush=True)
 
             # 📅 МЕСЯЧНЫЙ
             if should_send_monthly() and not already_sent("monthly"):
-                print("SENDING MONTHLY REPORT...")
+                print("SENDING MONTHLY REPORT...", flush=True)
                 send_monthly_reports()
 
             # 📆 ЕЖЕДНЕВНЫЙ
             if should_send_daily() and not already_sent("daily"):
-                print("SENDING DAILY REPORT...")
+                print("SENDING DAILY REPORT...", flush=True)
                 send_daily_report()
 
         except Exception as e:
-            print("SCHEDULER ERROR:", e)
+            print("SCHEDULER ERROR:", e, flush=True)
 
         time.sleep(60)

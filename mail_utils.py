@@ -132,6 +132,7 @@ def daily_report_attachment():
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
+            'Код талона': t.code,
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
@@ -179,6 +180,7 @@ def monthly_report_attachment():
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
+            'Код талона': t.code,
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
 
@@ -205,6 +207,7 @@ def monthly_reports_by_clients():
 
         data[client].append({
             '№ талона': t.serial_number,
+            'Код талона': t.code,
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',

@@ -26,8 +26,7 @@ def already_sent(key):
 
 
 def should_send_monthly():
-    now = datetime.now()
-    return now.day == 1 and now.hour == 9
+    return True
 
 
 def should_send_daily():

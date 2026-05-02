@@ -177,9 +177,9 @@ def monthly_report_attachment():
 
             'Договор': t.contract.number if t.contract else '',
             'Доп. соглашение': (
-                t.addendum_file.title
-                if t.addendum_file and t.addendum_file.title
-                else (t.addendum_file.original_name if t.addendum_file else '')
+                t.addendum_file.original_name
+                or t.addendum_file.title
+                if t.addendum_file else ''
             ),
         })
 
@@ -208,9 +208,9 @@ def monthly_reports_by_clients():
 
             'Договор': t.contract.number if t.contract else '',
             'Доп. соглашение': (
-                t.addendum_file.title
-                if t.addendum_file and t.addendum_file.title
-                else (t.addendum_file.original_name if t.addendum_file else '')
+                t.addendum_file.original_name
+                or t.addendum_file.title
+                if t.addendum_file else ''
             ),
         })
 

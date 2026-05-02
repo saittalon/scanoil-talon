@@ -68,8 +68,12 @@ def notify_event(subject: str, body: str):
 
 # ================= DATA =================
 
+from sqlalchemy.orm import joinedload
+
 def get_used_talons_query(start=None, end=None):
-    q = Talon.query.filter(Talon.used_at.isnot(None))
+    q = Talon.query.options(
+        joinedload(Talon.addendum_file)  # 🔥 ВОТ ЭТО ГЛАВНОЕ
+    ).filter(Talon.used_at.isnot(None))
 
     if start:
         q = q.filter(Talon.used_at >= start)

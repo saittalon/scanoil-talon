@@ -164,22 +164,17 @@ def get_last_month_range():
 
 
 def monthly_report_attachment():
-    now = datetime.utcnow()
-
-    first_day_this_month = datetime(now.year, now.month, 1)
-    last_month_end = first_day_this_month - timedelta(seconds=1)
-    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
+    start, end = get_last_month_range()
 
     rows = []
 
-    for t in get_used_talons_query(last_month_start, last_month_end).all():
+    for t in get_used_talons_query(start, end).all():
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
 
-            # 🔥 ВОТ НОВОЕ
             'Договор': t.contract.number if t.contract else '',
             'Доп. соглашение': (
                 t.addendum_file.title
@@ -198,15 +193,11 @@ def monthly_report_attachment():
 
 
 def monthly_reports_by_clients():
-    now = datetime.utcnow()
-
-    first_day_this_month = datetime(now.year, now.month, 1)
-    last_month_end = first_day_this_month - timedelta(seconds=1)
-    last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
+    start, end = get_last_month_range()
 
     data = defaultdict(list)
 
-    for t in get_used_talons_query(last_month_start, last_month_end).all():
+    for t in get_used_talons_query(start, end).all():
         client = t.client.name if t.client else "Без клиента"
 
         data[client].append({
@@ -215,7 +206,6 @@ def monthly_reports_by_clients():
             'Дата': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
 
-            # 🔥 ВОТ НОВОЕ
             'Договор': t.contract.number if t.contract else '',
             'Доп. соглашение': (
                 t.addendum_file.title

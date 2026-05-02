@@ -124,8 +124,11 @@ def daily_report_attachment():
     end = start + timedelta(days=1)
 
     rows = []
-
-    for t in get_used_talons_query(start, end):
+    
+    for t in get_used_talons_query(start, end).all():
+        print("DEBUG:", t.id, t.addendum_file_id, t.addendum_file)
+        
+        
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,

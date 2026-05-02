@@ -401,8 +401,7 @@ def create_app():
 
     @app.get("/send-monthly")
     def send_monthly():
-        return "HELLO MONTHLY"
-
+        return str(send_monthly_reports())
     
     @app.get("/ping")
     def ping():

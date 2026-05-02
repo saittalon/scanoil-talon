@@ -176,10 +176,7 @@ def monthly_report_attachment():
             'Дата': format_kz(t.used_at),
 
             'Договор': t.contract.number if t.contract else '',
-            'Доп. соглашение': (
-                (t.addendum_file.original_name or t.addendum_file.title)
-                if t.addendum_file else ''
-            ),
+            'Доп. соглашение': getattr(t.addendum_file, "original_name", ""),
         })
 
     file = build_excel(rows, "monthly_all")
@@ -206,10 +203,7 @@ def monthly_reports_by_clients():
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
 
             'Договор': t.contract.number if t.contract else '',
-            'Доп. соглашение': (
-                (t.addendum_file.original_name or t.addendum_file.title)
-                if t.addendum_file else ''
-            ),
+            'Доп. соглашение': getattr(t.addendum_file, "original_name", ""),
         })
 
     attachments = []

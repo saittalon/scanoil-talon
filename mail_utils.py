@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from io import BytesIO
 from datetime import datetime, timedelta
 from collections import defaultdict
+from flask import current_app
 
 import pandas as pd
 
@@ -153,7 +154,7 @@ def monthly_report_attachment():
 
     rows = []
 
-    for t in get_used_talons_query(start):
+    for t in get_used_talons_query(start).all():
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
@@ -176,7 +177,7 @@ def monthly_reports_by_clients():
 
     data = defaultdict(list)
 
-    for t in get_used_talons_query(start):
+    for t in get_used_talons_query(start).all():
         client = t.client.name if t.client else "Без клиента"
 
         data[client].append({

@@ -404,6 +404,11 @@ def create_app():
     def send_monthly():
         return "HELLO MONTHLY"
 
+    
+    @app.get("/ping")
+    def ping():
+        return "PING OK"
+
 
     @app.get("/tg/scan")
     def tg_scan():

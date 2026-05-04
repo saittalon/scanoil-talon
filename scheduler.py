@@ -4,8 +4,7 @@ from datetime import datetime
 from app import create_app
 from mail_utils import send_monthly_reports, send_daily_report
 
-
-print("SCHEDULER VERSION FINAL", flush=True)
+print("SCHEDULER VERSION FINAL FIXED", flush=True)
 
 app = create_app()
 
@@ -45,21 +44,21 @@ def mark_sent(key):
 # ⚙️ РЕЖИМ РАБОТЫ
 # =====================
 
-TEST_MODE = True   # 🔥 СМЕНИ НА False ПОСЛЕ ПРОВЕРКИ
+TEST_MODE = True   # 🔥 поставь False когда всё проверишь
 
 
 def should_send_daily():
     if TEST_MODE:
         return True
     now = datetime.now()
-    return now.hour == 18  # каждый день в 18:00
+    return now.hour == 18
 
 
 def should_send_monthly():
     if TEST_MODE:
         return True
     now = datetime.now()
-    return now.day == 1 and now.hour == 9  # 1 числа в 09:00
+    return now.day == 1 and now.hour == 9
 
 
 # =====================
@@ -74,24 +73,26 @@ with app.app_context():
             now = datetime.now()
             print("NOW:", now, flush=True)
 
-            # 📅 МЕСЯЧНЫЙ ОТЧЁТ
+            # 📅 ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ
             print("CHECK MONTHLY...", flush=True)
             if should_send_monthly() and not already_sent("monthly"):
-                print("SENDING MONTHLY REPORT...", flush=True)
-                send_monthly_reports()
+                print("CALLING MONTHLY...", flush=True)
+                result = send_monthly_reports()
+                print("MONTHLY RESULT:", result, flush=True)
                 mark_sent("monthly")
 
             # 📆 ЕЖЕДНЕВНЫЙ ОТЧЁТ
             print("CHECK DAILY...", flush=True)
             if should_send_daily() and not already_sent("daily"):
-                print("SENDING DAILY REPORT...", flush=True)
-                send_daily_report()
+                print("CALLING DAILY...", flush=True)
+                result = send_daily_report()
+                print("DAILY RESULT:", result, flush=True)
                 mark_sent("daily")
 
         except Exception as e:
+            import traceback
             print("SCHEDULER ERROR:", e, flush=True)
+            traceback.print_exc()
 
-        time.sleep(60)  # проверка каждую минуту
-            print("SCHEDULER ERROR:", e, flush=True)
-
-        time.sleep(10)  # быстрее для теста
+        # 🔥 один нормальный sleep без багов
+        time.sleep(10 if TEST_MODE else 60)

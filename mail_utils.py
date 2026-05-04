@@ -9,7 +9,7 @@ from collections import defaultdict
 import pandas as pd
 
 from models import Talon
-from helpers import talon_status_label, format_kz, kz_now
+from helpers import format_kz, kz_now
 
 
 # ================= EMAIL =================
@@ -28,27 +28,52 @@ def send_email(subject: str, body: str, attachments=None):
     sender = os.getenv('MAIL_FROM', username or 'noreply@example.com')
     use_tls = os.getenv('SMTP_USE_TLS', '1').strip() not in ('0', 'false', 'False')
 
-    if not recipients or not host:
+    print("\n=== EMAIL DEBUG ===")
+    print("TO:", recipients)
+    print("HOST:", host)
+    print("===================")
+
+    if not recipients:
+        print("❌ MAIL_TO пустой")
         return False
 
-    msg = EmailMessage()
-    msg['Subject'] = subject
-    msg['From'] = sender
-    msg['To'] = ', '.join(recipients)
-    msg.set_content(body)
+    if not host:
+        print("❌ SMTP_HOST пустой")
+        return False
 
-    for name, content, mime in attachments or []:
-        maintype, subtype = mime.split('/', 1)
-        msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=name)
+    try:
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = sender
+        msg['To'] = ', '.join(recipients)
+        msg.set_content(body)
 
-    with smtplib.SMTP(host, port, timeout=10) as s:
-        if use_tls:
-            s.starttls()
-        if username:
-            s.login(username, password)
-        s.send_message(msg)
+        # 📎 вложения
+        for name, content, mime in attachments or []:
+            maintype, subtype = mime.split('/', 1)
+            msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=name)
 
-    return True
+        print("CONNECTING SMTP...")
+
+        with smtplib.SMTP(host, port, timeout=20) as s:
+            if use_tls:
+                s.starttls()
+                print("TLS OK")
+
+            if username:
+                s.login(username, password)
+                print("LOGIN OK")
+
+            s.send_message(msg)
+            print("✅ EMAIL SENT")
+
+        return True
+
+    except Exception as e:
+        import traceback
+        print("❌ EMAIL ERROR:", e)
+        traceback.print_exc()
+        return False
 
 
 def notify_event(subject: str, body: str):
@@ -72,7 +97,7 @@ from sqlalchemy.orm import joinedload
 
 def get_used_talons_query(start=None, end=None):
     q = Talon.query.options(
-        joinedload(Talon.addendum_file)  # 🔥 ВОТ ЭТО ГЛАВНОЕ
+        joinedload(Talon.addendum_file)
     ).filter(Talon.used_at.isnot(None))
 
     if start:
@@ -96,7 +121,6 @@ def build_excel(rows, sheet_name="report"):
 
     with pd.ExcelWriter(bio, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
-
         ws = writer.sheets[sheet_name]
 
         ws.auto_filter.ref = ws.dimensions
@@ -124,11 +148,8 @@ def daily_report_attachment():
     end = start + timedelta(days=1)
 
     rows = []
-    
+
     for t in get_used_talons_query(start, end).all():
-        print("DEBUG:", t.id, t.addendum_file_id, t.addendum_file)
-        
-        
         rows.append({
             'Клиент': t.client.name if t.client else '',
             '№ талона': t.serial_number,
@@ -137,6 +158,8 @@ def daily_report_attachment():
             'Дата': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
         })
+
+    print("DAILY ROWS:", len(rows))
 
     file = build_excel(rows, "daily")
 
@@ -149,13 +172,16 @@ def daily_report_attachment():
 
 def send_daily_report():
     try:
+        print("=== DAILY REPORT START ===")
         return send_email(
             subject="Ежедневный отчёт (использованные талоны)",
             body="Отчёт за сегодня",
             attachments=[daily_report_attachment()]
         )
     except Exception as e:
-        print(f'DAILY REPORT ERROR: {e}')
+        import traceback
+        print("DAILY REPORT ERROR:")
+        traceback.print_exc()
         return False
 
 
@@ -183,10 +209,11 @@ def monthly_report_attachment():
             'Код талона': t.code,
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
-
             'Договор': t.contract.number if t.contract else '',
             'Доп. соглашение': getattr(t.addendum_file, "original_name", ""),
         })
+
+    print("MONTHLY ROWS:", len(rows))
 
     file = build_excel(rows, "monthly_all")
 
@@ -211,7 +238,6 @@ def monthly_reports_by_clients():
             'Литры': float(t.liters or 0),
             'Дата': format_kz(t.used_at),
             'АГЗС': t.used_agzs.name if t.used_agzs else '',
-
             'Договор': t.contract.number if t.contract else '',
             'Доп. соглашение': getattr(t.addendum_file, "original_name", ""),
         })
@@ -229,8 +255,10 @@ def monthly_reports_by_clients():
 
     return attachments
 
+
 def send_monthly_reports():
     try:
+        print("=== MONTHLY REPORT START ===")
         attachments = [monthly_report_attachment()]
         attachments += monthly_reports_by_clients()
 
@@ -240,5 +268,7 @@ def send_monthly_reports():
             attachments=attachments
         )
     except Exception as e:
-        print(f'MONTHLY REPORT ERROR: {e}')
+        import traceback
+        print("MONTHLY REPORT ERROR:")
+        traceback.print_exc()
         return False

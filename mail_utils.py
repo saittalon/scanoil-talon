@@ -48,14 +48,13 @@ def send_email(subject: str, body: str, attachments=None):
         msg['To'] = ', '.join(recipients)
         msg.set_content(body)
 
-        # 📎 вложения
         for name, content, mime in attachments or []:
             maintype, subtype = mime.split('/', 1)
             msg.add_attachment(content, maintype=maintype, subtype=subtype, filename=name)
 
         print("CONNECTING SMTP...")
 
-        with smtplib.SMTP(host, port, timeout=20) as s:
+        with smtplib.SMTP(host, port, timeout=60) as s:
             if use_tls:
                 s.starttls()
                 print("TLS OK")
@@ -194,7 +193,13 @@ def get_last_month_range():
     last_month_end = first_day_this_month - timedelta(seconds=1)
     last_month_start = datetime(last_month_end.year, last_month_end.month, 1)
 
-    return last_month_start, last_month_end
+    # 🔥 фикс диапазона (без потерь)
+    start = last_month_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = last_month_end.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    print("MONTH RANGE:", start, end)
+
+    return start, end
 
 
 def monthly_report_attachment():
@@ -230,7 +235,12 @@ def monthly_reports_by_clients():
     data = defaultdict(list)
 
     for t in get_used_talons_query(start, end).all():
-        client = t.client.name if t.client else "Без клиента"
+        # 🔥 нормализация клиента
+        client = (
+            t.client.name.strip().lower()
+            if t.client and t.client.name
+            else f"без клиента #{t.id}"
+        )
 
         data[client].append({
             '№ талона': t.serial_number,
@@ -252,6 +262,8 @@ def monthly_reports_by_clients():
             file,
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         ))
+
+    print("CLIENT FILES:", len(attachments))
 
     return attachments
 

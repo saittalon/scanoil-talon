@@ -1,10 +1,10 @@
 import time
-from datetime import datetime
 
 from app import create_app
 from mail_utils import send_monthly_reports, send_daily_report
+from helpers import kz_now
 
-print("SCHEDULER VERSION FINAL FIXED", flush=True)
+print("SCHEDULER FINAL", flush=True)
 
 app = create_app()
 
@@ -19,7 +19,7 @@ last_run = {
 
 
 def already_sent(key):
-    now = datetime.now()
+    now = kz_now()
 
     if key == "daily":
         return last_run["daily"] == now.date()
@@ -31,7 +31,7 @@ def already_sent(key):
 
 
 def mark_sent(key):
-    now = datetime.now()
+    now = kz_now()
 
     if key == "daily":
         last_run["daily"] = now.date()
@@ -41,24 +41,15 @@ def mark_sent(key):
 
 
 # =====================
-# ⚙️ РЕЖИМ РАБОТЫ
+# 📅 УСЛОВИЯ ОТПРАВКИ
 # =====================
 
-TEST_MODE = True   # 🔥 поставь False когда всё проверишь
+def should_send_daily(now):
+    return now.hour == 18  # каждый день в 18:00
 
 
-def should_send_daily():
-    if TEST_MODE:
-        return True
-    now = datetime.now()
-    return now.hour == 18
-
-
-def should_send_monthly():
-    if TEST_MODE:
-        return True
-    now = datetime.now()
-    return now.day == 1 and now.hour == 9
+def should_send_monthly(now):
+    return now.day == 1 and now.hour == 9  # 1 числа в 09:00
 
 
 # =====================
@@ -70,20 +61,20 @@ with app.app_context():
 
     while True:
         try:
-            now = datetime.now()
+            now = kz_now()
             print("NOW:", now, flush=True)
 
-            # 📅 ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ
+            # 📅 ЕЖЕМЕСЯЧНЫЙ
             print("CHECK MONTHLY...", flush=True)
-            if should_send_monthly() and not already_sent("monthly"):
+            if should_send_monthly(now) and not already_sent("monthly"):
                 print("CALLING MONTHLY...", flush=True)
                 result = send_monthly_reports()
                 print("MONTHLY RESULT:", result, flush=True)
                 mark_sent("monthly")
 
-            # 📆 ЕЖЕДНЕВНЫЙ ОТЧЁТ
+            # 📆 ЕЖЕДНЕВНЫЙ
             print("CHECK DAILY...", flush=True)
-            if should_send_daily() and not already_sent("daily"):
+            if should_send_daily(now) and not already_sent("daily"):
                 print("CALLING DAILY...", flush=True)
                 result = send_daily_report()
                 print("DAILY RESULT:", result, flush=True)
@@ -94,5 +85,4 @@ with app.app_context():
             print("SCHEDULER ERROR:", e, flush=True)
             traceback.print_exc()
 
-        # 🔥 один нормальный sleep без багов
-        time.sleep(10 if TEST_MODE else 60)
+        time.sleep(60)

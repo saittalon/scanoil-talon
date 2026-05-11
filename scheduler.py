@@ -1,7 +1,13 @@
 import time
 
 from app import create_app
-from mail_utils import send_monthly_reports, send_daily_report
+from mail_utils import send_daily_report
+try:
+    from mail_utils import send_monthly_reports
+except Exception:
+    def send_monthly_reports():
+        print('send_monthly_reports is not available', flush=True)
+        return False
 from helpers import kz_now
 
 print("SCHEDULER FINAL", flush=True)
@@ -45,7 +51,7 @@ def mark_sent(key):
 # =====================
 
 def should_send_daily(now):
-    return now.hour == 18  # каждый день в 18:00
+    return now.hour == 1  # каждый день в 01:00
 
 
 def should_send_monthly(now):

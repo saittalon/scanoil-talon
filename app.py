@@ -2,11 +2,17 @@ import os
 import json
 from urllib import request as urllib_request, parse as urllib_parse
 from datetime import datetime, timezone
-from mail_utils import send_daily_report, send_monthly_reports
+from mail_utils import send_daily_report
+try:
+    from mail_utils import send_monthly_reports
+except Exception:
+    def send_monthly_reports():
+        print('send_monthly_reports is not available')
+        return False
 from sqlalchemy import text
 
 from flask import (
-    Flask, redirect, url_for, request, jsonify, render_template, abort, flash, send_file, g
+    Flask, redirect, url_for, request, jsonify, render_template, abort, flash, send_file, g, current_app
 )
 from flask_login import LoginManager, login_required
 from supabase import create_client

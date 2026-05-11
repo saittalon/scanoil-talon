@@ -95,11 +95,11 @@ def _is_in_period(dt_value, start, end):
     if dt_value is None:
         return not start and not end
 
-    if hasattr(dt_value, 'hour'):
-        # База хранит UTC, сайт показывает Казахстан: +5 часов
-        dt_date = (dt_value + pd.Timedelta(hours=5)).date()
-    else:
-        dt_date = dt_value
+    try:
+        # Берём дату ровно так, как она отображается на сайте
+        dt_date = pd.to_datetime(format_kz(dt_value, '%Y-%m-%d')).date()
+    except Exception:
+        dt_date = dt_value.date() if hasattr(dt_value, 'date') else dt_value
 
     if start and dt_date < start:
         return False
@@ -119,6 +119,8 @@ def _filter_talons(q, start, end):
     result = []
 
     for t in talons:
+        # Если талон использован — фильтруем по дате использования
+        # Если активный — по дате создания
         dt = t.used_at if t.used_at else t.created_at
 
         if _is_in_period(dt, start, end):

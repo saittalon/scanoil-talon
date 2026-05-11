@@ -95,10 +95,9 @@ def _is_in_period(dt_value, start, end):
     if dt_value is None:
         return not start and not end
 
-    # Переводим время из UTC в Казахстанское время (+5 часов)
     if hasattr(dt_value, 'hour'):
-        dt_value = dt_value + pd.Timedelta(hours=5)
-        dt_date = dt_value.date()
+        # База хранит UTC, сайт показывает Казахстан: +5 часов
+        dt_date = (dt_value + pd.Timedelta(hours=5)).date()
     else:
         dt_date = dt_value
 
@@ -113,10 +112,19 @@ def _is_in_period(dt_value, start, end):
 
 def _filter_talons(q, start, end):
     talons = q.all()
+
     if not start and not end:
         return talons
-    return [t for t in talons if _is_in_period(_talon_operation_dt(t), start, end)]
 
+    result = []
+
+    for t in talons:
+        dt = t.used_at if t.used_at else t.created_at
+
+        if _is_in_period(dt, start, end):
+            result.append(t)
+
+    return result
 
 def _talon_left_and_spent(t):
     left = 0.0 if t.effective_state == 'used' else float(t.liters or 0)

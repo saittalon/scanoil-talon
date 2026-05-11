@@ -44,7 +44,8 @@
       </div>
       <div class="col-md-3 d-flex align-items-end gap-2 flex-wrap">
         <button class="btn btn-outline-secondary" type="submit">Показать</button>
-        <a class="btn btn-brand" href="/reports/all.xlsx?category={{ selected_category or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">Скачать Excel</a>
+        <a class="btn btn-brand" href="/reports/all.xlsx?category={{ selected_category or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">Сводка Excel</a>
+        <a class="btn btn-outline-secondary" href="/reports/used.xlsx?category={{ selected_category or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">Использованные Excel</a>
       </div>
     </form>
   </div>

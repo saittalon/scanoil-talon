@@ -1,4 +1,5 @@
 import os
+import re
 import smtplib
 import threading
 from email.message import EmailMessage
@@ -13,11 +14,16 @@ from models import Talon
 from helpers import format_kz, kz_now
 
 
-# ================= EMAIL =================
-
 def _recipients():
     raw = os.getenv('MAIL_TO', '').strip()
     return [x.strip() for x in raw.split(',') if x.strip()]
+
+
+def _safe_filename(value: str) -> str:
+    value = (value or "client").strip()
+    value = re.sub(r'[\\/:*?"<>|]+', '_', value)
+    value = re.sub(r'\s+', ' ', value)
+    return value[:80] or "client"
 
 
 def send_email(subject: str, body: str, attachments=None):
@@ -32,6 +38,7 @@ def send_email(subject: str, body: str, attachments=None):
     print("\n=== EMAIL DEBUG ===")
     print("TO:", recipients)
     print("HOST:", host)
+    print("ATTACHMENTS:", len(attachments or []))
     print("===================")
 
     if not recipients:
@@ -56,10 +63,8 @@ def send_email(subject: str, body: str, attachments=None):
         with smtplib.SMTP(host, port, timeout=60) as s:
             if use_tls:
                 s.starttls()
-
             if username:
                 s.login(username, password)
-
             s.send_message(msg)
 
         print("✅ EMAIL SENT")
@@ -80,8 +85,6 @@ def notify_event(subject: str, body: str):
     return True
 
 
-# ================= QUERY =================
-
 def get_used_talons_query(start=None, end=None):
     q = Talon.query.options(
         joinedload(Talon.addendum_file),
@@ -99,10 +102,23 @@ def get_used_talons_query(start=None, end=None):
     if end:
         q = q.filter(Talon.used_at < end)
 
-    return q.order_by(Talon.used_at.asc())
+    return q.order_by(Talon.used_at.asc(), Talon.id.asc())
 
 
-# ================= EXCEL =================
+def _autosize_sheet(ws):
+    ws.auto_filter.ref = ws.dimensions
+    ws.freeze_panes = "A2"
+
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+
+        for cell in col:
+            if cell.value is not None:
+                max_length = max(max_length, len(str(cell.value)))
+
+        ws.column_dimensions[col_letter].width = min(max_length + 3, 60)
+
 
 def build_excel(rows, sheet_name="report"):
     bio = BytesIO()
@@ -113,26 +129,55 @@ def build_excel(rows, sheet_name="report"):
 
     with pd.ExcelWriter(bio, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
-        ws = writer.sheets[sheet_name]
-
-        ws.auto_filter.ref = ws.dimensions
-        ws.freeze_panes = "A2"
-
-        for col in ws.columns:
-            max_length = 0
-            col_letter = col[0].column_letter
-
-            for cell in col:
-                if cell.value is not None:
-                    max_length = max(max_length, len(str(cell.value)))
-
-            ws.column_dimensions[col_letter].width = max_length + 3
+        _autosize_sheet(writer.sheets[sheet_name])
 
     bio.seek(0)
     return bio.read()
 
 
-# ================= DAILY =================
+def build_monthly_summary_excel(summary_rows, detail_rows):
+    bio = BytesIO()
+
+    summary_df = pd.DataFrame(summary_rows)
+    detail_df = pd.DataFrame(detail_rows)
+
+    if summary_df.empty:
+        summary_df = pd.DataFrame([{"Нет данных": "Нет использованных талонов за прошлый месяц"}])
+
+    if detail_df.empty:
+        detail_df = pd.DataFrame([{"Нет данных": "Нет использованных талонов за прошлый месяц"}])
+
+    with pd.ExcelWriter(bio, engine='openpyxl') as writer:
+        summary_df.to_excel(writer, sheet_name="summary", index=False)
+        detail_df.to_excel(writer, sheet_name="details", index=False)
+        _autosize_sheet(writer.sheets["summary"])
+        _autosize_sheet(writer.sheets["details"])
+
+    bio.seek(0)
+    return bio.read()
+
+
+def build_client_monthly_excel(summary_rows, detail_rows):
+    bio = BytesIO()
+
+    summary_df = pd.DataFrame(summary_rows)
+    detail_df = pd.DataFrame(detail_rows)
+
+    if summary_df.empty:
+        summary_df = pd.DataFrame([{"Нет данных": "Нет использованных талонов за прошлый месяц"}])
+
+    if detail_df.empty:
+        detail_df = pd.DataFrame([{"Нет данных": "Нет использованных талонов за прошлый месяц"}])
+
+    with pd.ExcelWriter(bio, engine='openpyxl') as writer:
+        summary_df.to_excel(writer, sheet_name="summary", index=False)
+        detail_df.to_excel(writer, sheet_name="details", index=False)
+        _autosize_sheet(writer.sheets["summary"])
+        _autosize_sheet(writer.sheets["details"])
+
+    bio.seek(0)
+    return bio.read()
+
 
 def daily_report_attachment():
     now = kz_now()
@@ -185,8 +230,6 @@ def send_daily_report():
     )
 
 
-# ================= MONTHLY =================
-
 def get_last_month_range():
     now = kz_now()
 
@@ -204,52 +247,124 @@ def get_last_month_range():
     return start, end
 
 
-def monthly_report_final():
+def _monthly_rows():
     start, end = get_last_month_range()
-
-    data = defaultdict(lambda: {"talons": 0, "liters": 0.0})
 
     talons = get_used_talons_query(start, end).all()
 
     print("MONTHLY TOTAL USED TALONS:", len(talons))
 
+    summary = defaultdict(lambda: {"talons": 0, "liters": 0.0})
+    client_summary = defaultdict(lambda: defaultdict(lambda: {"talons": 0, "liters": 0.0}))
+    detail_rows = []
+    client_detail_rows = defaultdict(list)
+
     for t in talons:
         if not t.client or not t.client.name:
             continue
 
-        name = t.client.name.strip()
+        client_name = t.client.name.strip()
+        agzs_name = t.used_agzs.name if t.used_agzs else '—'
+        liters = float(t.liters or 0)
+        contract = t.contract
 
-        data[name]["talons"] += 1
-        data[name]["liters"] += float(t.liters or 0)
+        key = (client_name, agzs_name)
+        summary[key]["talons"] += 1
+        summary[key]["liters"] += liters
 
-    rows = []
+        client_summary[client_name][agzs_name]["talons"] += 1
+        client_summary[client_name][agzs_name]["liters"] += liters
 
-    for client, v in sorted(data.items()):
-        rows.append({
-            "Контрагент": client,
+        detail = {
+            "Дата": format_kz(t.used_at, '%d.%m.%Y') if t.used_at else '',
+            "Время": format_kz(t.used_at, '%H:%M:%S') if t.used_at else '',
+            "Контрагент": client_name,
+            "АГЗС": agzs_name,
+            "Количество талонов": 1,
+            "Использовано литров": liters,
+            "№ талона": t.serial_number,
+            "Код талона": t.code,
+            "Договор": contract.number if contract else '',
+            "Доп. соглашение": t.addendum_file.original_name if getattr(t, 'addendum_file', None) else '',
+        }
+
+        detail_rows.append(detail)
+        client_detail_rows[client_name].append(detail)
+
+    summary_rows = []
+    for (client_name, agzs_name), v in sorted(summary.items(), key=lambda x: (x[0][0], x[0][1])):
+        summary_rows.append({
+            "Контрагент": client_name,
+            "АГЗС": agzs_name,
             "Количество талонов": v["talons"],
-            "Использовано литров": v["liters"]
+            "Использовано литров": v["liters"],
         })
 
-    print("MONTHLY CLIENTS COUNT:", len(rows))
+    client_files_data = {}
+    for client_name, agzs_map in client_summary.items():
+        rows = []
+        for agzs_name, v in sorted(agzs_map.items(), key=lambda x: x[0]):
+            rows.append({
+                "Контрагент": client_name,
+                "АГЗС": agzs_name,
+                "Количество талонов": v["talons"],
+                "Использовано литров": v["liters"],
+            })
 
-    return build_excel(rows, "summary")
+        client_files_data[client_name] = {
+            "summary": rows,
+            "details": client_detail_rows[client_name],
+        }
+
+    return summary_rows, detail_rows, client_files_data
+
+
+def monthly_report_final():
+    summary_rows, detail_rows, _client_files_data = _monthly_rows()
+    return build_monthly_summary_excel(summary_rows, detail_rows)
+
+
+def monthly_report_attachments():
+    summary_rows, detail_rows, client_files_data = _monthly_rows()
+
+    attachments = []
+
+    summary_file = build_monthly_summary_excel(summary_rows, detail_rows)
+    attachments.append((
+        "monthly_summary.xlsx",
+        summary_file,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ))
+
+    for client_name, data in sorted(client_files_data.items(), key=lambda x: x[0]):
+        file = build_client_monthly_excel(
+            summary_rows=data["summary"],
+            detail_rows=data["details"],
+        )
+
+        filename = f"{_safe_filename(client_name)}_monthly.xlsx"
+        attachments.append((
+            filename,
+            file,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ))
+
+    return attachments
 
 
 def send_monthly_reports():
     try:
         print("=== MONTHLY REPORT START ===")
 
-        file = monthly_report_final()
+        attachments = monthly_report_attachments()
 
         return send_email(
             subject="Ежемесячный отчёт по контрагентам",
-            body="Сводный отчёт за прошлый месяц",
-            attachments=[(
-                "monthly_summary.xlsx",
-                file,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )]
+            body=(
+                "Во вложении общий ежемесячный отчёт и отдельные Excel-файлы "
+                "по каждому контрагенту. В отчётах добавлена разбивка по АГЗС."
+            ),
+            attachments=attachments
         )
 
     except Exception:

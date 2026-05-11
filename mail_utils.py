@@ -3,7 +3,8 @@ import smtplib
 import threading
 from email.message import EmailMessage
 from io import BytesIO
-from datetime import timedelta
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 import pandas as pd
 from sqlalchemy.orm import joinedload
@@ -103,12 +104,12 @@ def get_used_talons_query(start=None, end=None):
 
 # ================= EXCEL =================
 
-def build_excel(rows, sheet_name="daily"):
+def build_excel(rows, sheet_name="report"):
     bio = BytesIO()
     df = pd.DataFrame(rows)
 
     if df.empty:
-        df = pd.DataFrame([{"Нет данных": "Нет использованных талонов за период"}])
+        df = pd.DataFrame([{"Нет данных": "Нет данных за период"}])
 
     with pd.ExcelWriter(bio, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
@@ -131,7 +132,7 @@ def build_excel(rows, sheet_name="daily"):
     return bio.read()
 
 
-# ================= DAILY REPORT =================
+# ================= DAILY =================
 
 def daily_report_attachment():
     now = kz_now()
@@ -182,3 +183,77 @@ def send_daily_report():
         body=f'Во вложении отчёт по использованным талонам за {report_day.strftime("%d.%m.%Y")}.',
         attachments=[daily_report_attachment()],
     )
+
+
+# ================= MONTHLY =================
+
+def get_last_month_range():
+    now = kz_now()
+
+    first_day_this_month = datetime(now.year, now.month, 1)
+
+    if now.month == 1:
+        start = datetime(now.year - 1, 12, 1)
+    else:
+        start = datetime(now.year, now.month - 1, 1)
+
+    end = first_day_this_month
+
+    print("MONTH RANGE:", start, end)
+
+    return start, end
+
+
+def monthly_report_final():
+    start, end = get_last_month_range()
+
+    data = defaultdict(lambda: {"talons": 0, "liters": 0.0})
+
+    talons = get_used_talons_query(start, end).all()
+
+    print("MONTHLY TOTAL USED TALONS:", len(talons))
+
+    for t in talons:
+        if not t.client or not t.client.name:
+            continue
+
+        name = t.client.name.strip()
+
+        data[name]["talons"] += 1
+        data[name]["liters"] += float(t.liters or 0)
+
+    rows = []
+
+    for client, v in sorted(data.items()):
+        rows.append({
+            "Контрагент": client,
+            "Количество талонов": v["talons"],
+            "Использовано литров": v["liters"]
+        })
+
+    print("MONTHLY CLIENTS COUNT:", len(rows))
+
+    return build_excel(rows, "summary")
+
+
+def send_monthly_reports():
+    try:
+        print("=== MONTHLY REPORT START ===")
+
+        file = monthly_report_final()
+
+        return send_email(
+            subject="Ежемесячный отчёт по контрагентам",
+            body="Сводный отчёт за прошлый месяц",
+            attachments=[(
+                "monthly_summary.xlsx",
+                file,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )]
+        )
+
+    except Exception:
+        import traceback
+        print("MONTHLY ERROR:")
+        traceback.print_exc()
+        return False

@@ -579,18 +579,41 @@ def used_talons_report_excel():
     start, end, date_from, date_to, month = _resolve_period()
     category = _selected_category()
 
-    # Отдельный Excel только по фактически использованным талонам.
-    # Фильтр идёт строго по used_at, поэтому 50 л от Mobil O.K. за 10.05 тоже попадёт.
-    talons = Talon.query.filter(Talon.used_at.isnot(None)).order_by(Talon.used_at.asc(), Talon.id.asc()).all()
+    talons = Talon.query.filter(
+        Talon.used_at.isnot(None)
+    ).order_by(Talon.used_at.asc(), Talon.id.asc()).all()
+
+    # фильтр по дате, как она отображается пользователю
     if start or end:
-        talons = [t for t in talons if _is_in_period(t.used_at, start, end)]
+        filtered = []
+        for t in talons:
+            try:
+                used_date = pd.to_datetime(format_kz(t.used_at, '%Y-%m-%d')).date()
+            except Exception:
+                used_date = t.used_at.date() if t.used_at else None
+
+            if not used_date:
+                continue
+
+            if start and used_date < start:
+                continue
+
+            if end and used_date > end:
+                continue
+
+            filtered.append(t)
+
+        talons = filtered
+
     talons = _filter_talons_by_category(talons, category)
 
     rows = []
+
     for t in talons:
         contract = t.contract
         price = float(contract.price_per_liter or 0) if (contract and contract.price_per_liter is not None) else 0.0
         liters = float(t.liters or 0)
+
         rows.append({
             'Дата': format_kz(t.used_at, '%d.%m.%Y') if t.used_at else '',
             'Время': format_kz(t.used_at, '%H:%M:%S') if t.used_at else '',
@@ -608,29 +631,40 @@ def used_talons_report_excel():
         })
 
     df = pd.DataFrame(rows)
+
     if df.empty:
-        df = pd.DataFrame([{'Нет данных': 'Нет использованных талонов за выбранный период'}])
+        df = pd.DataFrame([{
+            'Нет данных': 'Нет использованных талонов за выбранный период'
+        }])
 
     output = BytesIO()
+
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         sheet_name = 'used_talons'
         df.to_excel(writer, index=False, sheet_name=sheet_name)
+
         ws = writer.sheets[sheet_name]
         ws.auto_filter.ref = ws.dimensions
         ws.freeze_panes = 'A2'
+
         for col in ws.columns:
             max_length = 0
             col_letter = col[0].column_letter
+
             for cell in col:
                 if cell.value is not None:
                     max_length = max(max_length, len(str(cell.value)))
+
             ws.column_dimensions[col_letter].width = max_length + 3
 
     output.seek(0)
+
     suffix = month or (f'{date_from}_{date_to}' if date_from or date_to else 'all')
     suffix = suffix.replace(':', '-').replace('/', '-')
+
     if category:
         suffix = f'{category}_{suffix}'
+
     return send_file(
         output,
         as_attachment=True,

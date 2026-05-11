@@ -2,7 +2,7 @@ from flask import Blueprint, send_file, render_template, request
 from flask_login import login_required
 from io import BytesIO
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import pandas as pd
 from models import Client, Talon, Balance, Shift, AGZS
 from helpers import talon_status_label, format_kz
@@ -91,23 +91,73 @@ def _talon_operation_dt(t):
     return t.used_at or t.created_at
 
 
+def _candidate_dates_for_period(dt_value):
+    """
+    Возвращает несколько вариантов даты:
+    1) как показывает сайт через format_kz()
+    2) как UTC + 5 часов (Казахстан)
+    3) сырая дата из базы
+
+    Это нужно, чтобы талон 10.05.2026 00:12 не пропадал,
+    если в базе он хранится как 09.05.2026 19:12 UTC.
+    """
+    dates = []
+
+    if dt_value is None:
+        return dates
+
+    # 1. Дата как отображается пользователю
+    try:
+        shown = format_kz(dt_value, '%Y-%m-%d')
+        if shown:
+            dates.append(pd.to_datetime(shown).date())
+    except Exception:
+        pass
+
+    # 2. UTC -> Казахстан +5
+    try:
+        if hasattr(dt_value, 'date'):
+            dates.append((dt_value + timedelta(hours=5)).date())
+    except Exception:
+        pass
+
+    # 3. Сырая дата из базы
+    try:
+        if hasattr(dt_value, 'date'):
+            dates.append(dt_value.date())
+        else:
+            dates.append(dt_value)
+    except Exception:
+        pass
+
+    # убираем дубли
+    result = []
+    for d in dates:
+        if d and d not in result:
+            result.append(d)
+
+    return result
+
+
+def _date_in_period(dt_date, start, end):
+    if start and dt_date < start:
+        return False
+    if end and dt_date > end:
+        return False
+    return True
+
+
 def _is_in_period(dt_value, start, end):
     if dt_value is None:
         return not start and not end
 
-    try:
-        # Берём дату ровно так, как она отображается на сайте
-        dt_date = pd.to_datetime(format_kz(dt_value, '%Y-%m-%d')).date()
-    except Exception:
-        dt_date = dt_value.date() if hasattr(dt_value, 'date') else dt_value
+    candidate_dates = _candidate_dates_for_period(dt_value)
 
-    if start and dt_date < start:
-        return False
+    if not candidate_dates:
+        return not start and not end
 
-    if end and dt_date > end:
-        return False
-
-    return True
+    # Если хотя бы один вариант даты попадает в выбранный период — показываем талон
+    return any(_date_in_period(d, start, end) for d in candidate_dates)
 
 
 def _filter_talons(q, start, end):
@@ -119,14 +169,15 @@ def _filter_talons(q, start, end):
     result = []
 
     for t in talons:
-        # Если талон использован — фильтруем по дате использования
-        # Если активный — по дате создания
+        # Использованные талоны фильтруем по used_at,
+        # активные/неиспользованные — по created_at.
         dt = t.used_at if t.used_at else t.created_at
 
         if _is_in_period(dt, start, end):
             result.append(t)
 
     return result
+
 
 def _talon_left_and_spent(t):
     left = 0.0 if t.effective_state == 'used' else float(t.liters or 0)
@@ -583,27 +634,10 @@ def used_talons_report_excel():
         Talon.used_at.isnot(None)
     ).order_by(Talon.used_at.asc(), Talon.id.asc()).all()
 
-    # фильтр по дате, как она отображается пользователю
+    # Фильтр по дате использования с учётом Казахстанского времени.
+    # Так талон, использованный 10.05.2026 00:12, попадёт в период 10.05.2026 — 10.05.2026.
     if start or end:
-        filtered = []
-        for t in talons:
-            try:
-                used_date = pd.to_datetime(format_kz(t.used_at, '%Y-%m-%d')).date()
-            except Exception:
-                used_date = t.used_at.date() if t.used_at else None
-
-            if not used_date:
-                continue
-
-            if start and used_date < start:
-                continue
-
-            if end and used_date > end:
-                continue
-
-            filtered.append(t)
-
-        talons = filtered
+        talons = [t for t in talons if _is_in_period(t.used_at, start, end)]
 
     talons = _filter_talons_by_category(talons, category)
 

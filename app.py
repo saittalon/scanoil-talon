@@ -536,7 +536,16 @@ def create_app():
             "used_at_text": format_kz(used_time),
             "amount": amount,
         })
-
+        
+    @app.get("/test-email")
+    @login_required
+    @require_roles("director", "zamdirector", "deputy_director")
+    def test_email():
+        ok = send_daily_report()
+        if ok:
+            return "✅ Тестовое письмо успешно отправлено."
+        return "❌ Ошибка отправки письма. Проверь логи Railway."
+        
     return app
 
 

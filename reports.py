@@ -94,11 +94,20 @@ def _talon_operation_dt(t):
 def _is_in_period(dt_value, start, end):
     if dt_value is None:
         return not start and not end
-    dt_date = dt_value.date() if hasattr(dt_value, 'date') else dt_value
+
+    # Переводим время из UTC в Казахстанское время (+5 часов)
+    if hasattr(dt_value, 'hour'):
+        dt_value = dt_value + pd.Timedelta(hours=5)
+        dt_date = dt_value.date()
+    else:
+        dt_date = dt_value
+
     if start and dt_date < start:
         return False
+
     if end and dt_date > end:
         return False
+
     return True
 
 

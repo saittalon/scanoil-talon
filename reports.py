@@ -147,12 +147,21 @@ def _client_rows(talons, client):
 def _resolved_client_category(client):
     if not client:
         return 'employee'
+
+    # Сначала определяем по названию. Это важно, потому что у некоторых
+    # контрагентов категория в базе может быть ошибочно сохранена как employee.
+    sample = f"{getattr(client, 'name', '') or ''} {getattr(client, 'full_name', '') or ''}".lower()
+    org_markers = [
+        'тоо', 'too', 'тoo', 'toо', 'llp', 'ип ', ' ip ',
+        'company', 'security', 'corp', 'group', 'ltd', 'inc'
+    ]
+    if any(marker in f' {sample} ' for marker in org_markers):
+        return 'counterparty'
+
     raw = (getattr(client, 'category', None) or '').strip().lower()
     if raw in ('counterparty', 'employee'):
         return raw
-    sample = f"{getattr(client, 'name', '') or ''} {getattr(client, 'full_name', '') or ''}".lower()
-    if any(marker in sample for marker in ['тоо', 'too', 'ип', 'ip', 'llp']):
-        return 'counterparty'
+
     return 'employee'
 
 
@@ -521,15 +530,12 @@ def all_clients_report_excel():
         addendum_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=addendum_start)
         balance_start = addendum_start + len(addendum_df) + 4
         balance_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=balance_start)
-        detail_start = balance_start + len(balance_df) + 4
-        detail_df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=detail_start)
 
         ws = writer.sheets[sheet_name]
         ws['A1'] = f'Сводка по всем клиентам ({category_label})'
         ws[f'A{client_start + 1}'] = 'Сводка по клиентам'
         ws[f'A{addendum_start + 1}'] = 'Сводка по доп. соглашениям'
         ws[f'A{balance_start + 1}'] = 'Остатки по договорам'
-        ws[f'A{detail_start + 1}'] = 'Детальный отчёт'
 
         widths = {
             'A': 16, 'B': 20, 'C': 18, 'D': 16, 'E': 24, 'F': 14, 'G': 14, 'H': 14,
@@ -538,7 +544,7 @@ def all_clients_report_excel():
         }
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
-        ws.freeze_panes = f'A{detail_start + 2}'
+        ws.freeze_panes = f'A{client_start + 2}'
 
     output.seek(0)
     suffix = month or (f'{date_from}_{date_to}' if date_from or date_to else 'all')
@@ -546,6 +552,72 @@ def all_clients_report_excel():
     if category:
         suffix = f'{category}_{suffix}'
     return send_file(output, as_attachment=True, download_name=f'allclients_report_{suffix}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@reports_bp.get('/reports/used.xlsx')
+@login_required
+def used_talons_report_excel():
+    start, end, date_from, date_to, month = _resolve_period()
+    category = _selected_category()
+
+    # Отдельный Excel только по фактически использованным талонам.
+    # Фильтр идёт строго по used_at, поэтому 50 л от Mobil O.K. за 10.05 тоже попадёт.
+    talons = Talon.query.filter(Talon.used_at.isnot(None)).order_by(Talon.used_at.asc(), Talon.id.asc()).all()
+    if start or end:
+        talons = [t for t in talons if _is_in_period(t.used_at, start, end)]
+    talons = _filter_talons_by_category(talons, category)
+
+    rows = []
+    for t in talons:
+        contract = t.contract
+        price = float(contract.price_per_liter or 0) if (contract and contract.price_per_liter is not None) else 0.0
+        liters = float(t.liters or 0)
+        rows.append({
+            'Дата': format_kz(t.used_at, '%d.%m.%Y') if t.used_at else '',
+            'Время': format_kz(t.used_at, '%H:%M:%S') if t.used_at else '',
+            'Клиент': t.client.name if t.client else '',
+            'Держатель': t.holder_name or (t.client.name if t.client else ''),
+            'Договор': contract.number if contract else '',
+            'Доп. соглашение': t.addendum_file.original_name if getattr(t, 'addendum_file', None) else '',
+            'Товар': t.product_name,
+            'Литры': liters,
+            'АГЗС': t.used_agzs.name if t.used_agzs else '',
+            '№ талона': t.serial_number,
+            'Код талона': t.code,
+            'Цена': price,
+            'Стоимость': liters * price,
+        })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        df = pd.DataFrame([{'Нет данных': 'Нет использованных талонов за выбранный период'}])
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        sheet_name = 'used_talons'
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.sheets[sheet_name]
+        ws.auto_filter.ref = ws.dimensions
+        ws.freeze_panes = 'A2'
+        for col in ws.columns:
+            max_length = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                if cell.value is not None:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = max_length + 3
+
+    output.seek(0)
+    suffix = month or (f'{date_from}_{date_to}' if date_from or date_to else 'all')
+    suffix = suffix.replace(':', '-').replace('/', '-')
+    if category:
+        suffix = f'{category}_{suffix}'
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f'used_talons_report_{suffix}.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 
 @reports_bp.get('/reports/all')

@@ -2,7 +2,7 @@ import os
 import json
 from urllib import request as urllib_request, parse as urllib_parse
 from datetime import datetime, timezone
-
+from mail_utils import send_daily_report, send_monthly_reports
 from sqlalchemy import text
 
 from flask import (
@@ -23,7 +23,6 @@ from clients import clients_bp
 from reports import reports_bp
 from helpers import require_roles, talon_status_label, format_kz, kz_now, redeem_talon_atomic, talon_display_number
 from models import AuditLog
-from mail_utils import send_daily_report
 from contract_files import contract_files_bp
 from security import (
     get_csrf_token,
@@ -391,14 +390,34 @@ def create_app():
         log_audit('send_daily_report', f'Ручная отправка отчёта: {bool(ok)}')
         return jsonify({"ok": bool(ok)})
 
+
+    @app.get("/test-email")
+    def test_email():
+        try:
+            result = send_daily_report()
+            return f"OK: {result}"
+        except Exception as e:
+            return f"ERROR: {str(e)}"
+
+    @app.get("/send-monthly")
+    def send_monthly():
+        return str(send_monthly_reports())
+    
+    @app.get("/ping")
+    def ping():
+        return "PING OK"
+
+
     @app.get("/tg/scan")
     def tg_scan():
         token = request.args.get("token", "").strip()
         return render_template("tg_scan.html", token=token)
 
+
     @app.post("/tg/api/scan")
     def tg_api_scan():
         data = request.get_json(silent=True) or {}
+
         token = (data.get("token") or "").strip()
         code = (data.get("code") or "").strip()
         init_data = (data.get("initData") or "").strip()
@@ -536,16 +555,7 @@ def create_app():
             "used_at_text": format_kz(used_time),
             "amount": amount,
         })
-        
-    @app.get("/test-email")
-    @login_required
-    @require_roles("director", "zamdirector", "deputy_director")
-    def test_email():
-        ok = send_daily_report()
-        if ok:
-            return "✅ Тестовое письмо успешно отправлено."
-        return "❌ Ошибка отправки письма. Проверь логи Railway."
-        
+
     return app
 
 

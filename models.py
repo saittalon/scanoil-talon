@@ -166,7 +166,11 @@ class Talon(db.Model):
     valid_from = db.Column(db.Date, nullable=False, index=True)
     valid_to = db.Column(db.Date, nullable=False, index=True)
     addendum_file_id = db.Column(db.Integer, db.ForeignKey("contract_files.id"), nullable=True)
-    addendum_file = db.relationship("ContractFile", foreign_keys=[addendum_file_id])
+    addendum_file = db.relationship(
+        "ContractFile",
+        foreign_keys=[addendum_file_id],
+        lazy="joined"
+)
 
     state = db.Column(db.String(20), default="active", index=True)  # active/blocked/used/expired
     used_at = db.Column(db.DateTime, nullable=True)

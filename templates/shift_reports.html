@@ -7,7 +7,7 @@
 
 <div class="card card-soft mb-4">
   <form method="get" class="row g-3 align-items-end">
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label">АГЗС</label>
       <select class="form-select" name="agzs_id">
         <option value="">Все АГЗС</option>
@@ -16,15 +16,23 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label">Дата с</label>
       <input type="date" class="form-control" name="date_from" value="{{ date_from }}">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
+      <label class="form-label">Время с</label>
+      <input type="time" class="form-control" name="time_from" value="{{ time_from or '00:00' }}">
+    </div>
+    <div class="col-md-2">
       <label class="form-label">Дата по</label>
       <input type="date" class="form-control" name="date_to" value="{{ date_to }}">
     </div>
-    <div class="col-md-3 d-flex gap-2">
+    <div class="col-md-2">
+      <label class="form-label">Время по</label>
+      <input type="time" class="form-control" name="time_to" value="{{ time_to or '23:59' }}">
+    </div>
+    <div class="col-md-2 d-flex gap-2">
       <button class="btn btn-brand w-100" type="submit">Показать</button>
       <a class="btn btn-outline-secondary" href="/reports/shifts">Сбросить</a>
     </div>

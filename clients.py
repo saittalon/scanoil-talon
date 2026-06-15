@@ -30,7 +30,7 @@ def is_admin():
 
 
 def can_approve_balances():
-    return is_admin()
+    return has_role("director", "zamdirector", "deputy_director", "accountant")
 
 
 def can_edit_balances():
@@ -76,10 +76,18 @@ def _resolve_client_category(form):
 
 
 def _client_category_value(client: Client) -> str:
+    guessed = _guess_client_category(getattr(client, 'name', None), getattr(client, 'full_name', None))
+
+    # Если в названии видно ТОО/ИП/LLP и т.п., считаем это контрагентом
+    # даже если раньше категория в базе была случайно сохранена как employee.
+    if guessed == "counterparty":
+        return "counterparty"
+
     explicit = _normalize_client_category(getattr(client, 'category', None))
     if explicit:
         return explicit
-    return _guess_client_category(getattr(client, 'name', None), getattr(client, 'full_name', None))
+
+    return guessed
 
 
 def can_change_balance_directly_for_client(client: Client) -> bool:
@@ -243,7 +251,7 @@ def balance_set(client_id):
     )
 
     db.session.commit()
-    flash("Заявка отправлена на подтверждение директору/замдиректора.", "success")
+    flash("Заявка отправлена на подтверждение директору/замдиректора/бухгалтеру.", "success")
     return redirect(url_for("clients.client_contracts", client_id=client.id, id=contract_id))
 
 

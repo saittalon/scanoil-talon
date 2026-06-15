@@ -9,7 +9,7 @@ except Exception:
     def send_monthly_reports():
         print('send_monthly_reports is not available')
         return False
-from sqlalchemy import text
+from sqlalchemy import text, or_
 
 from flask import (
     Flask, redirect, url_for, request, jsonify, render_template, abort, flash, send_file, g, current_app
@@ -22,7 +22,7 @@ from backup_utils import build_backup_zip, upload_backup_bytes_to_supabase
 from models import (
     db,
     User, Talon, BotSession, TalonRedemption, WebAppToken,
-    ContractFile, Balance, BalanceChangeRequest
+    ContractFile, Balance, BalanceChangeRequest, AGZS
 )
 from auth import auth_bp
 from clients import clients_bp
@@ -108,6 +108,7 @@ def _ensure_balance_change_request_schema():
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS product_name VARCHAR(50) DEFAULT 'ГАЗ'",
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS old_liters DOUBLE PRECISION NULL",
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS requested_liters DOUBLE PRECISION NULL",
+        "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS new_liters DOUBLE PRECISION NULL",
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS delta_liters DOUBLE PRECISION NULL",
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS balance_control BOOLEAN DEFAULT TRUE",
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS comment VARCHAR(500) NULL",
@@ -115,6 +116,7 @@ def _ensure_balance_change_request_schema():
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NULL",
         "ALTER TABLE balance_change_requests ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP NULL",
         "UPDATE balance_change_requests SET requested_liters = old_liters WHERE requested_liters IS NULL AND old_liters IS NOT NULL",
+        "UPDATE balance_change_requests SET new_liters = requested_liters WHERE new_liters IS NULL AND requested_liters IS NOT NULL",
         "UPDATE balance_change_requests SET delta_liters = (COALESCE(requested_liters,0) - COALESCE(old_liters,0)) WHERE delta_liters IS NULL",
         "UPDATE balance_change_requests SET created_at = NOW() WHERE created_at IS NULL",
         "CREATE INDEX IF NOT EXISTS ix_balance_change_requests_client_contract ON balance_change_requests (client_id, contract_id, created_at)",
@@ -203,6 +205,58 @@ def _ensure_only_allowed_users():
         db.session.commit()
 
 
+DEFAULT_AGZS_STATIONS = [
+    "Бесарык",
+    "Тугискен",
+    "Келин тобе",
+    "Черноводск",
+    "Первомаевка - Ленгер",
+    "Косагаш Ленгер - Биргулук",
+    "Айтеке би",
+    "Түлкібас",
+    "Торткул",
+    "Ынтымак",
+    "Шорнак",
+    "ЖД - ТГЖД",
+    "Бирлик",
+    "Икан",
+]
+
+
+def _ensure_default_agzs_stations():
+    """Добавляет/обновляет АГЗС для Telegram-бота.
+
+    Логин = название АГЗС, пароль = название АГЗС + "123".
+    """
+    changed = False
+    for station_name in DEFAULT_AGZS_STATIONS:
+        station_name = station_name.strip()
+        if not station_name:
+            continue
+
+        agzs = AGZS.query.filter(or_(AGZS.name == station_name, AGZS.login == station_name)).first()
+        if agzs is None:
+            agzs = AGZS(name=station_name, login=station_name, is_active=True)
+            db.session.add(agzs)
+            changed = True
+        else:
+            if agzs.name != station_name:
+                agzs.name = station_name
+                changed = True
+            if agzs.login != station_name:
+                agzs.login = station_name
+                changed = True
+            if not agzs.is_active:
+                agzs.is_active = True
+                changed = True
+
+        agzs.set_password(f"{station_name}123")
+        changed = True
+
+    if changed:
+        db.session.commit()
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -215,6 +269,7 @@ def create_app():
         _ensure_balance_change_request_schema()
         _ensure_performance_indexes()
         _ensure_only_allowed_users()
+        _ensure_default_agzs_stations()
 
     login_manager = LoginManager()
     login_manager.login_view = "auth.login_get"

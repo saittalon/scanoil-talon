@@ -2,10 +2,10 @@ from flask import Blueprint, send_file, render_template, request
 from flask_login import login_required
 from io import BytesIO
 from calendar import monthrange
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, time as dt_time
 import pandas as pd
 from models import Client, Talon, Balance, Shift, AGZS
-from helpers import talon_status_label, format_kz
+from helpers import talon_status_label, format_kz, to_kz, KZ_TZ
 
 reports_bp = Blueprint('reports', __name__)
 
@@ -86,6 +86,24 @@ def _parse_date_arg(value: str):
         return pd.to_datetime(value).date(), value
     except Exception:
         return None, ''
+
+
+def _parse_time_arg(value: str):
+    value = (value or '').strip()
+    if not value:
+        return None, ''
+    for fmt in ('%H:%M', '%H:%M:%S'):
+        try:
+            return datetime.strptime(value, fmt).time(), value[:5]
+        except Exception:
+            pass
+    return None, ''
+
+
+def _combine_kz_datetime(date_value, time_value, default_time):
+    if not date_value:
+        return None
+    return datetime.combine(date_value, time_value or default_time, tzinfo=KZ_TZ)
 
 def _talon_operation_dt(t):
     return t.used_at or t.created_at
@@ -788,9 +806,18 @@ def shift_reports_page():
     agzs_id = request.args.get('agzs_id', type=int)
     date_from_raw = (request.args.get('date_from') or '').strip()
     date_to_raw = (request.args.get('date_to') or '').strip()
+    time_from_raw = (request.args.get('time_from') or '').strip()
+    time_to_raw = (request.args.get('time_to') or '').strip()
 
     date_from, date_from_value = _parse_date_arg(date_from_raw)
     date_to, date_to_value = _parse_date_arg(date_to_raw)
+    time_from, time_from_value = _parse_time_arg(time_from_raw)
+    time_to, time_to_value = _parse_time_arg(time_to_raw)
+
+    period_start = _combine_kz_datetime(date_from, time_from, dt_time.min)
+    period_end = _combine_kz_datetime(date_to, time_to, dt_time.max)
+    if period_end and time_to:
+        period_end = period_end + timedelta(minutes=1) - timedelta(microseconds=1)
 
     query = Shift.query.filter(Shift.is_closed.is_(True)).join(AGZS).order_by(Shift.closed_at.desc(), Shift.id.desc())
     if agzs_id:
@@ -799,12 +826,22 @@ def shift_reports_page():
     shifts = query.all()
     filtered = []
     for s in shifts:
-        closed_dt = s.closed_at or s.opened_at
-        closed_date = closed_dt.date() if closed_dt and hasattr(closed_dt, 'date') else closed_dt
-        if date_from and closed_date and closed_date < date_from:
+        closed_dt = to_kz(s.closed_at or s.opened_at)
+        if closed_dt is None:
             continue
-        if date_to and closed_date and closed_date > date_to:
+
+        if period_start and closed_dt < period_start:
             continue
+        if period_end and closed_dt > period_end:
+            continue
+
+        # Если дату не выбрали, но указали время, фильтруем по времени суток.
+        closed_time = closed_dt.time()
+        if not period_start and time_from and closed_time < time_from:
+            continue
+        if not period_end and time_to and closed_time > time_to:
+            continue
+
         filtered.append(s)
 
     total_shifts = len(filtered)
@@ -845,6 +882,8 @@ def shift_reports_page():
         selected_agzs_id=agzs_id,
         date_from=date_from_value,
         date_to=date_to_value,
+        time_from=time_from_value,
+        time_to=time_to_value,
         format_kz=format_kz,
     )
 

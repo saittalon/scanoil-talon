@@ -37,19 +37,21 @@ def format_kz(dt, fmt="%d.%m.%Y %H:%M"):
 
 
 def _expand_roles(roles):
-    expanded = set(roles)
-    if "zamdirector" in expanded:
-        expanded.add("deputy_director")
-    if "deputy_director" in expanded:
-        expanded.add("zamdirector")
-    if "executor" in expanded:
-        expanded.update({"operator", "accountant"})
-    if "operator" in expanded:
-        expanded.update({"executor", "accountant"})
-    admin_roles = {"director", "zamdirector", "deputy_director", "accountant"}
-    if expanded & admin_roles:
-        expanded |= admin_roles
+    requested = set(roles)
+    expanded = set(requested)
+
+    # zamdirector и deputy_director — одно и то же право, просто разные названия роли.
+    if "zamdirector" in requested or "deputy_director" in requested:
+        expanded.update({"zamdirector", "deputy_director"})
+
+    # executor и operator в системе используются как рабочие роли одного уровня.
+    if "executor" in requested or "operator" in requested:
         expanded.update({"executor", "operator"})
+
+        # Руководство и бухгалтер могут выполнять рабочие действия,
+        # но рабочие роли НЕ получают права руководства обратно.
+        expanded.update({"director", "zamdirector", "deputy_director", "accountant"})
+
     return expanded
 
 

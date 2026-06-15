@@ -14,8 +14,23 @@ from models import Talon
 from helpers import format_kz, kz_now
 
 
-def _recipients():
-    raw = os.getenv('MAIL_TO', '').strip()
+def _recipients(env_name='MAIL_TO'):
+    """Получатели писем.
+
+    Для ежедневного отчёта по использованным талонам можно указать отдельную
+    переменную DAILY_USED_TALONS_MAIL_TO. Сейчас по умолчанию используется muraztalon@gmail.com. Если нужно, адрес можно переопределить в Railway.
+    Несколько адресов можно писать через запятую.
+    """
+    raw = os.getenv(env_name, '').strip()
+
+    # Отдельная почта для ежедневного отчёта по использованным талонам.
+    # Railway-переменная DAILY_USED_TALONS_MAIL_TO может переопределить этот адрес.
+    if not raw and env_name == 'DAILY_USED_TALONS_MAIL_TO':
+        raw = 'muraztalon@gmail.com'
+
+    if not raw and env_name != 'MAIL_TO':
+        raw = os.getenv('MAIL_TO', '').strip()
+
     return [x.strip() for x in raw.split(',') if x.strip()]
 
 
@@ -26,8 +41,8 @@ def _safe_filename(value: str) -> str:
     return value[:80] or "client"
 
 
-def send_email(subject: str, body: str, attachments=None):
-    recipients = _recipients()
+def send_email(subject: str, body: str, attachments=None, recipients_env='MAIL_TO'):
+    recipients = _recipients(recipients_env)
     host = os.getenv('SMTP_HOST', '').strip()
     port = int(os.getenv('SMTP_PORT', '587'))
     username = os.getenv('SMTP_USERNAME', '').strip()
@@ -36,13 +51,14 @@ def send_email(subject: str, body: str, attachments=None):
     use_tls = os.getenv('SMTP_USE_TLS', '1').strip() not in ('0', 'false', 'False')
 
     print("\n=== EMAIL DEBUG ===")
+    print("TO_ENV:", recipients_env)
     print("TO:", recipients)
     print("HOST:", host)
     print("ATTACHMENTS:", len(attachments or []))
     print("===================")
 
     if not recipients:
-        print("❌ MAIL_TO пустой")
+        print(f"❌ {recipients_env} пустой и MAIL_TO пустой")
         return False
 
     if not host:
@@ -179,6 +195,7 @@ def send_daily_report():
         subject='Ежедневный отчёт по использованным талонам',
         body=f'Во вложении отчёт по использованным талонам за {report_day.strftime("%d.%m.%Y")}.',
         attachments=[daily_report_attachment()],
+        recipients_env='DAILY_USED_TALONS_MAIL_TO',
     )
 
 

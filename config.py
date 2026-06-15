@@ -27,6 +27,7 @@ class Config:
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     MAIL_FROM = os.getenv("MAIL_FROM", "")
     MAIL_TO = os.getenv("MAIL_TO", "")
+    DAILY_USED_TALONS_MAIL_TO = os.getenv("DAILY_USED_TALONS_MAIL_TO", "muraztalon@gmail.com")
 
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(10 * 1024 * 1024)))
     SESSION_COOKIE_HTTPONLY = True

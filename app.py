@@ -151,7 +151,7 @@ def _configure_logging(app):
 ALLOWED_SITE_USERS = {
     "Erdaulet1997": (os.getenv("DIRECTOR_PASSWORD", "123456Muraz"), "director"),
     "Gulbara2002": (os.getenv("DEPUTY_PASSWORD", "123456Muraz"), "zamdirector"),
-    "Erlan2003": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
+    "Manager": (os.getenv("EXECUTOR_PASSWORD", "123456Muraz"), "executor"),
     "Dana": (os.getenv("ACCOUNTANT_PASSWORD", "123456Muraz"), "accountant"),
 }
 

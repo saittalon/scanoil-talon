@@ -38,13 +38,17 @@ def validate_csrf() -> None:
     if request.path == '/login' or request.endpoint in CSRF_EXEMPT_ENDPOINTS:
         return
 
+    # Для загрузки файлов не читаем request.form первым делом.
+    # request.form заставляет Werkzeug полностью разобрать multipart/form-data,
+    # из-за чего большие файлы могут привести к Gunicorn timeout.
     sent_token = request.headers.get('X-CSRF-Token')
+    if not sent_token and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        sent_token = payload.get('csrf_token')
+    if not sent_token and request.content_length and request.content_length < 1024 * 1024:
+        sent_token = request.form.get('csrf_token')
     if not sent_token:
-        if request.is_json:
-            payload = request.get_json(silent=True) or {}
-            sent_token = payload.get('csrf_token')
-        else:
-            sent_token = request.form.get('csrf_token')
+        sent_token = request.args.get('csrf_token')
 
     real_token = session.get('_csrf_token')
     if not real_token or not sent_token or not secrets.compare_digest(str(real_token), str(sent_token)):

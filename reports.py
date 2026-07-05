@@ -298,81 +298,83 @@ def _addendum_name(t):
     return '— без доп. соглашения —'
 
 
+def _format_report_date(value):
+    if not value:
+        return ''
+    try:
+        return value.strftime('%d.%m.%Y')
+    except Exception:
+        try:
+            return pd.to_datetime(value).strftime('%d.%m.%Y')
+        except Exception:
+            return str(value)
+
+
+def _talon_valid_period_text(t):
+    date_from = getattr(t, 'valid_from', None)
+    date_to = getattr(t, 'valid_to', None)
+    if date_from and date_to:
+        return f"с {_format_report_date(date_from)} по {_format_report_date(date_to)}"
+    if date_from:
+        return f"с {_format_report_date(date_from)}"
+    if date_to:
+        return f"по {_format_report_date(date_to)}"
+    return '—'
+
+
+def _filter_talons_by_created_period(q, start, end):
+    """
+    Для отчёта по доп. соглашениям считаем, сколько литров клиент получил
+    в выбранном периоде. Поэтому фильтр идёт по created_at, а не по used_at.
+    """
+    talons = q.all()
+
+    if not start and not end:
+        return talons
+
+    result = []
+    for t in talons:
+        if _is_in_period(getattr(t, 'created_at', None), start, end):
+            result.append(t)
+    return result
+
+
 def _build_addendum_report_rows(talons):
     """
-    Группировка для отчёта: какой клиент по какому договору/доп. соглашению
-    получил и использовал сколько литров.
+    Простой отчёт только для контрагентов:
+    контрагент, доп. соглашение, период действия талонов и сколько литров выдано.
+    Без сводки, статусов, остатков, суммы и детализации по талонам.
     """
-    summary_map = {}
-    detail_rows = []
+    rows_map = {}
 
     for t in talons:
+        if not getattr(t, 'addendum_file_id', None):
+            continue
+
         client = getattr(t, 'client', None)
-        contract = getattr(t, 'contract', None)
+        if _resolved_client_category(client) != 'counterparty':
+            continue
+
         client_name = client.name if client else ''
-        contract_number = contract.number if contract else '—'
         addendum = _addendum_name(t)
-        price = float(contract.price_per_liter or 0) if (contract and contract.price_per_liter is not None) else 0.0
-        nominal = float(t.liters or 0)
-        left, spent = _talon_left_and_spent(t)
-        amount = nominal * price
-        state = getattr(t, 'effective_state', None) or 'active'
-        op_dt = _talon_operation_dt(t)
+        date_from = getattr(t, 'valid_from', None)
+        date_to = getattr(t, 'valid_to', None)
+        period = _talon_valid_period_text(t)
+        liters = float(t.liters or 0)
 
-        key = (client_name, contract_number, addendum)
-        bucket = summary_map.setdefault(key, {
-            'Клиент': client_name,
-            'Договор': contract_number,
+        key = (client_name, addendum, date_from, date_to)
+        bucket = rows_map.setdefault(key, {
+            'Контрагент': client_name,
             'Доп. соглашение': addendum,
-            'Талонов': 0,
-            'Всего литров': 0.0,
-            'Остаток литров': 0.0,
-            'Списано литров': 0.0,
-            'Активные талоны': 0,
-            'Использованные талоны': 0,
-            'Просроченные талоны': 0,
-            'Заблокированные талоны': 0,
-            'Сумма': 0.0,
+            'Период': period,
+            'Количество, л': 0.0,
         })
-        bucket['Талонов'] += 1
-        bucket['Всего литров'] += nominal
-        bucket['Остаток литров'] += left
-        bucket['Списано литров'] += spent
-        bucket['Сумма'] += amount
-        if state == 'used':
-            bucket['Использованные талоны'] += 1
-        elif state == 'expired':
-            bucket['Просроченные талоны'] += 1
-        elif state == 'blocked':
-            bucket['Заблокированные талоны'] += 1
-        else:
-            bucket['Активные талоны'] += 1
+        bucket['Количество, л'] += liters
 
-        detail_rows.append({
-            'Дата': format_kz(op_dt, '%d.%m.%Y') if op_dt else '',
-            'Время': format_kz(op_dt, '%H:%M:%S') if op_dt else '',
-            'Клиент': client_name,
-            'Договор': contract_number,
-            'Доп. соглашение': addendum,
-            'Держатель': t.holder_name or client_name,
-            '№ талона': t.serial_number,
-            'Код талона': t.code,
-            'Товар': t.product_name or 'ГАЗ',
-            'Номинал': nominal,
-            'Остаток': left,
-            'Списано': spent,
-            'Цена': price,
-            'Стоимость': amount,
-            'АГЗС': t.used_agzs.name if getattr(t, 'used_agzs', None) else '',
-            'Статус': talon_status_label(t),
-            'Дата использования': format_kz(t.used_at, '%d.%m.%Y') if t.used_at else '',
-            'Время использования': format_kz(t.used_at, '%H:%M') if t.used_at else '',
-        })
-
-    summary_rows = sorted(summary_map.values(), key=lambda r: (str(r.get('Клиент') or ''), str(r.get('Договор') or ''), str(r.get('Доп. соглашение') or '')))
-    detail_rows = sorted(detail_rows, key=lambda r: (str(r.get('Клиент') or ''), str(r.get('Договор') or ''), str(r.get('Доп. соглашение') or ''), str(r.get('№ талона') or '')))
-    return summary_rows, detail_rows
-
+    return sorted(
+        rows_map.values(),
+        key=lambda r: (str(r.get('Контрагент') or ''), str(r.get('Доп. соглашение') or ''), str(r.get('Период') or ''))
+    )
 
 def _filter_talons_by_client(talons, client_id):
     if not client_id:
@@ -895,57 +897,29 @@ def reports_all_page():
 @login_required
 def addendum_reports_page():
     start, end, date_from, date_to, month = _resolve_period()
-    category = _selected_category()
     selected_client_id = request.args.get('client_id', type=int)
 
-    talons = _filter_talons(Talon.query.order_by(Talon.created_at.desc(), Talon.id.desc()), start, end)
-    talons = _filter_talons_by_category(talons, category)
+    talons = _filter_talons_by_created_period(
+        Talon.query.order_by(Talon.created_at.desc(), Talon.id.desc()),
+        start,
+        end,
+    )
     talons = _filter_talons_by_client(talons, selected_client_id)
+    rows = _build_addendum_report_rows(talons)
 
-    summary_rows, detail_rows = _build_addendum_report_rows(talons)
-
-    total_count = len(talons)
-    total_liters = sum(float(t.liters or 0) for t in talons)
-    total_used_liters = sum(float(_talon_left_and_spent(t)[1]) for t in talons)
-    total_left_liters = sum(float(_talon_left_and_spent(t)[0]) for t in talons)
-    total_sum = sum(float(r.get('Сумма') or 0) for r in summary_rows)
-
-    page = request.args.get('page', 1, type=int)
-    per_page = 200
-    start_idx = max((page - 1) * per_page, 0)
-    end_idx = start_idx + per_page
-    paged_detail_rows = detail_rows[start_idx:end_idx]
-    total_pages = max(1, (len(detail_rows) + per_page - 1) // per_page)
-    pagination = {
-        'page': page,
-        'per_page': per_page,
-        'total': len(detail_rows),
-        'pages': total_pages,
-        'has_prev': page > 1,
-        'has_next': page < total_pages,
-        'prev_num': page - 1,
-        'next_num': page + 1,
-    }
-
-    clients = Client.query.order_by(Client.name.asc()).all()
+    clients = [
+        c for c in Client.query.order_by(Client.name.asc()).all()
+        if _resolved_client_category(c) == 'counterparty'
+    ]
 
     return render_template(
         'reports_addendums.html',
-        rows=summary_rows,
-        detail_rows=paged_detail_rows,
+        rows=rows,
         clients=clients,
         selected_client_id=selected_client_id,
-        selected_category=category,
-        selected_category_label=_category_label(category),
         date_from=date_from,
         date_to=date_to,
         selected_month=month,
-        total_count=total_count,
-        total_liters=total_liters,
-        total_used_liters=total_used_liters,
-        total_left_liters=total_left_liters,
-        total_sum=total_sum,
-        pagination=pagination,
     )
 
 
@@ -953,65 +927,44 @@ def addendum_reports_page():
 @login_required
 def addendum_reports_excel():
     start, end, date_from, date_to, month = _resolve_period()
-    category = _selected_category()
     selected_client_id = request.args.get('client_id', type=int)
 
-    talons = _filter_talons(Talon.query.order_by(Talon.id.asc()), start, end)
-    talons = _filter_talons_by_category(talons, category)
+    talons = _filter_talons_by_created_period(
+        Talon.query.order_by(Talon.created_at.asc(), Talon.id.asc()),
+        start,
+        end,
+    )
     talons = _filter_talons_by_client(talons, selected_client_id)
+    rows = _build_addendum_report_rows(talons)
 
-    summary_rows, detail_rows = _build_addendum_report_rows(talons)
-
-    total_count = len(talons)
-    total_liters = sum(float(t.liters or 0) for t in talons)
-    total_used_liters = sum(float(_talon_left_and_spent(t)[1]) for t in talons)
-    total_left_liters = sum(float(_talon_left_and_spent(t)[0]) for t in talons)
-    total_sum = sum(float(r.get('Сумма') or 0) for r in summary_rows)
-
-    selected_client = Client.query.get(selected_client_id) if selected_client_id else None
-    summary_df = pd.DataFrame([
-        {'Показатель': 'Период (от)', 'Значение': date_from or '—'},
-        {'Показатель': 'Период (до)', 'Значение': date_to or '—'},
-        {'Показатель': 'Категория', 'Значение': _category_label(category)},
-        {'Показатель': 'Клиент', 'Значение': selected_client.name if selected_client else 'Все'},
-        {'Показатель': 'Всего талонов', 'Значение': total_count},
-        {'Показатель': 'Всего литров', 'Значение': total_liters},
-        {'Показатель': 'Списано литров', 'Значение': total_used_liters},
-        {'Показатель': 'Остаток литров', 'Значение': total_left_liters},
-        {'Показатель': 'Общая сумма', 'Значение': total_sum},
-    ])
-    addendum_df = pd.DataFrame(summary_rows)
-    detail_df = pd.DataFrame(detail_rows)
-
-    if addendum_df.empty:
-        addendum_df = pd.DataFrame([{'Нет данных': 'За выбранный период нет талонов по доп. соглашениям'}])
-    if detail_df.empty:
-        detail_df = pd.DataFrame([{'Нет данных': 'За выбранный период нет детальных записей'}])
+    columns = ['Контрагент', 'Доп. соглашение', 'Период', 'Количество, л']
+    report_df = pd.DataFrame(rows, columns=columns)
+    if report_df.empty:
+        report_df = pd.DataFrame([{
+            'Контрагент': 'Нет данных',
+            'Доп. соглашение': '',
+            'Период': '',
+            'Количество, л': 0,
+        }], columns=columns)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        summary_df.to_excel(writer, index=False, sheet_name='Сводка', startrow=1)
-        writer.sheets['Сводка']['A1'] = 'Отчёт по доп. соглашениям'
-
-        addendum_df.to_excel(writer, index=False, sheet_name='По доп соглашениям')
-        detail_df.to_excel(writer, index=False, sheet_name='Детально')
-
-        for ws in writer.sheets.values():
-            ws.freeze_panes = 'A2'
-            ws.auto_filter.ref = ws.dimensions
-            for col in ws.columns:
-                col_letter = col[0].column_letter
-                max_length = 0
-                for cell in col:
-                    if cell.value is not None:
-                        max_length = max(max_length, len(str(cell.value)))
-                ws.column_dimensions[col_letter].width = min(max_length + 3, 48)
+        report_df.to_excel(writer, index=False, sheet_name='Отчет')
+        ws = writer.sheets['Отчет']
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = ws.dimensions
+        for col in ws.columns:
+            col_letter = col[0].column_letter
+            max_length = 0
+            for cell in col:
+                if cell.value is not None:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = min(max_length + 3, 60)
 
     output.seek(0)
+    selected_client = Client.query.get(selected_client_id) if selected_client_id else None
     suffix = month or (f'{date_from}_{date_to}' if date_from or date_to else 'all')
     suffix = suffix.replace(':', '-').replace('/', '-')
-    if category:
-        suffix = f'{category}_{suffix}'
     if selected_client:
         safe_client = ''.join(ch if ch.isalnum() or ch in ('_', '-') else '_' for ch in selected_client.name)[:40]
         suffix = f'{safe_client}_{suffix}'
@@ -1022,7 +975,6 @@ def addendum_reports_excel():
         download_name=f'addendum_report_{suffix}.xlsx',
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-
 
 @reports_bp.get('/reports/shifts')
 @login_required

@@ -64,6 +64,7 @@
       <nav class="sidebar-nav">
         <a class="sidebar-link {{ 'active' if request.path.startswith('/clients') else '' }}" href="/clients">Dashboard / Клиенты</a>
         <a class="sidebar-link {{ 'active' if request.path == '/reports' or request.path.startswith('/reports/all') else '' }}" href="/reports">Аналитика и отчёты</a>
+        <a class="sidebar-link {{ 'active' if request.path.startswith('/reports/addendums') else '' }}" href="{{ url_for('reports.addendum_reports_page') }}">Отчёт по доп. соглашениям</a>
         <a class="sidebar-link {{ 'active' if request.path.startswith('/reports/shifts') else '' }}" href="/reports/shifts">Отчёты по сменам</a>
         <a class="sidebar-link" href="/clients/new">Новый клиент</a>
         {% if current_user.role in ["director", "zamdirector", "deputy_director"] %}

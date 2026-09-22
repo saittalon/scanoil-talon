@@ -1064,6 +1064,95 @@ def shift_reports_page():
     )
 
 
+
+def _previous_calendar_month_range():
+    """Период прошлого календарного месяца — как в send-monthly."""
+    now = datetime.now(KZ_TZ)
+    end = datetime(now.year, now.month, 1)
+    if now.month == 1:
+        start = datetime(now.year - 1, 12, 1)
+    else:
+        start = datetime(now.year, now.month - 1, 1)
+    return start, end
+
+
+def _monthly_counterparty_summary_data():
+    start, end = _previous_calendar_month_range()
+
+    # Та же основа, что и send-monthly: только реально использованные талоны
+    # и фильтрация по used_at за предыдущий календарный месяц.
+    used_talons = Talon.query.filter(
+        Talon.used_at.isnot(None),
+        Talon.state == 'used',
+        Talon.used_at >= start,
+        Talon.used_at < end,
+    ).all()
+
+    counterparties = [
+        c for c in Client.query.order_by(Client.name.asc()).all()
+        if _resolved_client_category(c) == 'counterparty'
+    ]
+
+    totals = {c.id: {'talons': 0, 'liters': 0.0, 'amount': 0.0} for c in counterparties}
+    for t in used_talons:
+        if t.client_id not in totals:
+            continue
+        liters = float(t.liters or 0)
+        contract = t.contract
+        price = float(contract.price_per_liter or 0) if contract and contract.price_per_liter is not None else 0.0
+        totals[t.client_id]['talons'] += 1
+        totals[t.client_id]['liters'] += liters
+        totals[t.client_id]['amount'] += liters * price
+
+    rows = []
+    for c in counterparties:
+        value = totals[c.id]
+        rows.append({
+            'Контрагент': c.name,
+            'Количество талонов': value['talons'],
+            'Использовано литров': value['liters'],
+            'Стоимость': value['amount'],
+        })
+
+    return start, end, rows
+
+
+@reports_bp.get('/reports/monthly-summary')
+@login_required
+def monthly_counterparty_summary():
+    start, end, rows = _monthly_counterparty_summary_data()
+    return render_template(
+        'monthly_counterparty_summary.html',
+        rows=rows,
+        period_label=f'{MONTH_NAMES[start.month - 1]} {start.year}',
+        total_talons=sum(r['Количество талонов'] for r in rows),
+        total_liters=sum(r['Использовано литров'] for r in rows),
+        total_amount=sum(r['Стоимость'] for r in rows),
+    )
+
+
+@reports_bp.get('/reports/monthly-summary.xlsx')
+@login_required
+def monthly_counterparty_summary_excel():
+    start, end, rows = _monthly_counterparty_summary_data()
+    output = BytesIO()
+    df = pd.DataFrame(rows, columns=['Контрагент', 'Количество талонов', 'Использовано литров', 'Стоимость'])
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='summary', index=False)
+        ws = writer.sheets['summary']
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = ws.dimensions
+        for col in ws.columns:
+            max_length = max((len(str(cell.value)) if cell.value is not None else 0) for cell in col)
+            ws.column_dimensions[col[0].column_letter].width = min(max_length + 3, 45)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f'monthly_counterparties_{start.year}-{start.month:02d}.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
 @reports_bp.get('/reports')
 @login_required
 def reports_index():

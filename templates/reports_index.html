@@ -12,6 +12,12 @@
   </div>
 
   <div class="card card-soft section-card">
+    <div class="section-title">Месячная сводка по контрагентам</div>
+    <div class="section-subtitle">Автоматически показывает предыдущий календарный месяц, как send-monthly.</div>
+    <a class="btn btn-brand" href="{{ url_for('reports.monthly_counterparty_summary') }}">Открыть сводку</a>
+  </div>
+
+  <div class="card card-soft section-card">
     <div class="section-title">Отчёт по клиенту</div>
     <div class="d-flex gap-2 flex-wrap mb-2">
       <select class="form-select" id="clientCategory" style="max-width:220px" onchange="renderClientOptions()">

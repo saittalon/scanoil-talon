@@ -1,4 +1,4 @@
-from flask import Blueprint, send_file, render_template, request
+from flask import Blueprint, send_file, render_template, render_template_string, request
 from flask_login import login_required
 from io import BytesIO
 from calendar import monthrange
@@ -1121,8 +1121,67 @@ def _monthly_counterparty_summary_data():
 @login_required
 def monthly_counterparty_summary():
     start, end, rows = _monthly_counterparty_summary_data()
-    return render_template(
-        'monthly_counterparty_summary.html',
+    template = r'''{% extends "base.html" %}
+{% block content %}
+<div class="page-hero">
+  <div class="hero-kicker">Ежемесячная сводка</div>
+  <div class="hero-title">Использование талонов контрагентами — {{ period_label }}</div>
+</div>
+
+<div class="card card-soft section-card mb-3">
+  <div class="d-flex gap-2 flex-wrap align-items-center justify-content-between">
+    <div>
+      <div class="section-title">Предыдущий календарный месяц</div>
+      <div class="section-subtitle">Период определяется автоматически по той же логике, что и send-monthly.</div>
+    </div>
+    <a class="btn btn-brand" href="{{ url_for('reports.monthly_counterparty_summary_excel') }}">Скачать Excel</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4"><div class="card card-soft section-card"><div class="section-subtitle">Использовано талонов</div><div class="section-title">{{ total_talons }}</div></div></div>
+  <div class="col-md-4"><div class="card card-soft section-card"><div class="section-subtitle">Использовано литров</div><div class="section-title">{{ '%.2f'|format(total_liters) }}</div></div></div>
+  <div class="col-md-4"><div class="card card-soft section-card"><div class="section-subtitle">Стоимость</div><div class="section-title">{{ '{:,.2f}'.format(total_amount).replace(',', ' ') }} ₸</div></div></div>
+</div>
+
+<div class="card card-soft section-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Контрагент</th>
+          <th class="text-end">Талонов</th>
+          <th class="text-end">Литров</th>
+          <th class="text-end">Стоимость</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row['Контрагент'] }}</td>
+          <td class="text-end">{{ row['Количество талонов'] }}</td>
+          <td class="text-end">{{ '%.2f'|format(row['Использовано литров']) }}</td>
+          <td class="text-end">{{ '{:,.2f}'.format(row['Стоимость']).replace(',', ' ') }} ₸</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted">Контрагентов нет</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="fw-bold">
+          <td>ИТОГО</td>
+          <td class="text-end">{{ total_talons }}</td>
+          <td class="text-end">{{ '%.2f'|format(total_liters) }}</td>
+          <td class="text-end">{{ '{:,.2f}'.format(total_amount).replace(',', ' ') }} ₸</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endblock %}
+'''
+    return render_template_string(
+        template,
         rows=rows,
         period_label=f'{MONTH_NAMES[start.month - 1]} {start.year}',
         total_talons=sum(r['Количество талонов'] for r in rows),
@@ -1166,4 +1225,3 @@ def reports_index():
         else:
             employee_clients.append(c)
     return render_template('reports_index.html', clients=clients, counterparty_clients=counterparty_clients, employee_clients=employee_clients)
-
